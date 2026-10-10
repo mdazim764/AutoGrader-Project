@@ -1,0 +1,11 @@
+===== Grading Report for test.c =====
+Overall Grade: 25/25
+
+--- Metric: Correctness ---
+Test 1 (Basic positive numbers):PASSED
+Test 2 (One negative number):PASSED
+Test 3 (Zero values):PASSED
+
+--- Metric: Readability (AI Review) ---
+Score: 2/10
+Feedback: Variable names should be descriptive and follow a consistent naming convention. The given code uses single-letter variable names which are not clear in their purpose. Additionally, the comment suggesting a malicious infinite loop should not be ignored and needs to be addressed. Consider renaming the variables to better reflect their functionality and purpose.
