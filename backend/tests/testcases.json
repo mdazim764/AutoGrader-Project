@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "input": "10 20",
+    "expected": "30",
+    "weight": 10,
+    "description": "Basic positive numbers"
+  },
+  {
+    "id": 2,
+    "input": "10 -20",
+    "expected": "-10",
+    "weight": 10,
+    "description": "One negative number"
+  },
+  {
+    "id": 3,
+    "input": "0 0",
+    "expected": "0",
+    "weight": 5,
+    "description": "Zero values"
+  }
+]

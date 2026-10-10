@@ -1,68 +1,104 @@
 const { spawn } = require("child_process");
 const path = require("path");
-const fs = require("fs"); // File system module for reading test files
+const fs = require("fs");
 
-// Paths define karna
 const exePath = path.join(__dirname, "../submissions/test.exe");
-const inputPath = path.join(__dirname, "../tests/01_basic.in");
-const expectedOutputPath = path.join(__dirname, "../tests/01_basic.out");
+const testCasesPath = path.join(__dirname, "../tests/testcases.json");
 
-// 1. Read Input and Expected Output from files
-const inputData = fs.readFileSync(inputPath, "utf-8");
-const expectedOutput = fs.readFileSync(expectedOutputPath, "utf-8").trim();
+// 1. JSON file se saare test cases read karna
+const testCases = JSON.parse(fs.readFileSync(testCasesPath, "utf-8"));
 
-console.log("-----------------------------------------");
-console.log(`Running test with input: ${inputData.trim()}`);
-console.log("-----------------------------------------\n");
+// 2. Ek function jo sirf EK test case run karega aur Promise return karega
+function runSingleTestCase(testCase) {
+  return new Promise((resolve) => {
+    const child = spawn(exePath);
+    let output = "";
+    let errorOutput = "";
+    let isTimeout = false;
 
-const child = spawn(exePath);
+    // Timeout Protection
+    const timer = setTimeout(() => {
+      isTimeout = true;
+      child.kill("SIGKILL");
+      resolve({
+        passed: false,
+        reason: "Time Limit Exceeded (Infinite Loop)",
+        earnedWeight: 0,
+      });
+    }, 2000);
 
-let output = "";
-let errorOutput = "";
-let isTimeout = false;
+    child.stdout.on("data", (data) => (output += data.toString()));
+    child.stderr.on("data", (data) => (errorOutput += data.toString()));
 
-// Timeout Protection (2 seconds)
-const TIME_LIMIT = 2000;
-const timeoutTimer = setTimeout(() => {
-  isTimeout = true;
-  child.kill("SIGKILL");
-  console.log(`❌ Time Limit Exceeded! Process killed after ${TIME_LIMIT}ms.`);
-}, TIME_LIMIT);
+    child.on("close", () => {
+      clearTimeout(timer);
+      if (isTimeout) return; // Agar timeout hua toh pehle hi resolve ho chuka hai
 
-// Capture Output
-child.stdout.on("data", (data) => {
-  output += data.toString();
-});
+      if (errorOutput) {
+        resolve({
+          passed: false,
+          reason: `Runtime Error: ${errorOutput.trim()}`,
+          earnedWeight: 0,
+        });
+        return;
+      }
 
-// Capture Errors
-child.stderr.on("data", (data) => {
-  errorOutput += data.toString();
-});
+      const actualOutput = output.trim();
+      const expectedOutput = testCase.expected.trim();
 
-// 2. When Program Finishes
-child.on("close", (code) => {
-  clearTimeout(timeoutTimer);
+      if (actualOutput === expectedOutput) {
+        resolve({
+          passed: true,
+          reason: "Correct Output",
+          earnedWeight: testCase.weight,
+        });
+      } else {
+        resolve({
+          passed: false,
+          reason: `Wrong Answer. Expected: ${expectedOutput}, Got: ${actualOutput}`,
+          earnedWeight: 0,
+        });
+      }
+    });
 
-  if (isTimeout) return;
+    // Test case ka input C program ko bhejna
+    child.stdin.write(testCase.input + "\n");
+    child.stdin.end();
+  });
+}
 
-  if (errorOutput) {
-    console.log(`Runtime Error: \n${errorOutput}`);
-    return;
+// 3. Main Loop jo saare test cases ko ek-ek karke chalayega
+async function runAllTests() {
+  console.log(
+    `Starting AutoGrader Engine...\nFound ${testCases.length} Test Cases.\n`,
+  );
+
+  let totalScore = 0;
+  let maxScore = 0;
+
+  for (let i = 0; i < testCases.length; i++) {
+    const tc = testCases[i];
+    maxScore += tc.weight;
+
+    // await lagane se agla test tabhi chalega jab ye wala poora ho jayega
+    const result = await runSingleTestCase(tc);
+
+    if (result.passed) {
+      totalScore += result.earnedWeight;
+      console.log(
+        `Test [${tc.id}] (${tc.description}): ✅ PASSED (+${result.earnedWeight} pts)`,
+      );
+    } else {
+      console.log(
+        `Test [${tc.id}] (${tc.description}): ❌ FAILED - ${result.reason}`,
+      );
+    }
   }
 
-  // 3. The Core Verification Logic
-  const actualOutput = output.trim();
+  console.log("\n=================================");
+  console.log(`FINAL I/O SCORE: ${totalScore} / ${maxScore}`);
+  console.log("=================================\n");
+}
 
-  console.log(`Expected Output: ${expectedOutput}`);
-  console.log(`Actual Output  : ${actualOutput}\n`);
-
-  if (actualOutput === expectedOutput) {
-    console.log("✅ Verdict: Test Case Passed! (10/10 Marks)");
-  } else {
-    console.log("❌ Verdict: Test Case Failed! (0/10 Marks)");
-  }
-});
-
-// 4. Feed the file content to the C program
-child.stdin.write(inputData);
-child.stdin.end();
+// Execution Start
+runAllTests();
