@@ -62,11 +62,16 @@ function runSingleTestCase(testCase) {
   });
 }
 
-// 2. Ollama LLM Reviewer (From Stage 3)
+// 2. Ollama LLM Reviewer (Fixes Applied)
 async function analyzeReadability(code) {
-  const prompt = `You are a strict C programming instructor. Review this code for readability and variable naming. Do NOT evaluate logic.
+  // 1. Sanitize the code to ensure it's not a single line string
+  const cleanCode = String(code).replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+
+  const prompt = `You are an expert C programming instructor. 
+    Review this code for readability, variable naming, and commenting.
+    Give a score out of 10. A basic working code with no comments should get at least a 5.
     Return ONLY a JSON object: {"score": <0-10>, "feedback": "<one short sentence>"}
-    Code: \n${code}`;
+    Code: \n${cleanCode}`;
 
   try {
     const response = await fetch("http://localhost:11434/api/generate", {
@@ -77,6 +82,9 @@ async function analyzeReadability(code) {
         prompt: prompt,
         stream: false,
         format: "json",
+        options: {
+          temperature: 0.1, // 2. Zero-Temperature for deterministic scoring
+        },
       }),
     });
 
