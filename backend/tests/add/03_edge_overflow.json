@@ -1,0 +1,7 @@
+{
+  "id": "edge_overflow",
+  "description": "Testing INT_MAX overflow handling",
+  "input": "2147483647 1",
+  "expected": "-2147483648", 
+  "complexity_size": 1 
+}

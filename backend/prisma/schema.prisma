@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Supabase uses PostgreSQL
+}
+
+// 1. Roles Enum (Instructor vs Student)
+enum Role {
+  INSTRUCTOR
+  STUDENT
+}
+
+// 2. Submission Status Enum
+enum Status {
+  PENDING
+  GRADING
+  COMPLETED
+  FAILED
+}
+
+// 3. User Table
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+
+  // Relations
+  problems    Problem[]    // Problems created by instructor
+  submissions Submission[] // Submissions made by student
+}
+
+// 4. Problem Table (Instructor Side)
+model Problem {
+  id              String   @id @default(uuid())
+  title           String   // e.g., "Add Two Integers"
+  statement       String   // Full description of the problem
+  timeLimitSec    Int      @default(1)
+  memoryLimitMb   Int      @default(64)
+  
+  // 🔥 THE GAME CHANGER: JSONB Column
+  // Isme instructor ke saare dynamic rules, weights, aur test cases aayenge
+  rules           Json     
+  
+  instructorId    String
+  instructor      User     @relation(fields: [instructorId], references: [id])
+  createdAt       DateTime @default(now())
+
+  // Relations
+  submissions     Submission[]
+}
+
+// 5. Submission Table (Student & Agent Side)
+model Submission {
+  id          String   @id @default(uuid())
+  code        String   // Student's raw C code
+  status      Status   @default(PENDING)
+  finalScore  Float?   // Out of 100
+  
+  // 🔥 THE REPORT: JSONB Column
+  // Isme Agent apni puri kundli (time complexity, AI feedback, test results) daalega
+  report      Json?    
+  
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  problemId   String
+  problem     Problem  @relation(fields: [problemId], references: [id])
+  createdAt   DateTime @default(now())
+}

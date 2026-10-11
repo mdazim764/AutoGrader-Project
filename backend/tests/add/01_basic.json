@@ -1,0 +1,7 @@
+{
+  "id": "basic_01",
+  "description": "Standard positive numbers",
+  "input": "10 20",
+  "expected": "30",
+  "complexity_size": 1
+}

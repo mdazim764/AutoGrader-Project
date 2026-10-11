@@ -1,0 +1,25 @@
+{
+  "problem": "add_two_integers",
+  "time_limit_s": 1,
+  "memory_limit_mb": 64,
+  "metrics": [
+    {
+      "name": "correctness",
+      "analyzer": "io_tests",
+      "weight": 0.20,
+      "params": { "testset_dir": "tests/add/" }
+    },
+    {
+      "name": "syntax",
+      "analyzer": "compiler_warnings",
+      "weight": 0.10,
+      "params": { "flags": "-Wall -Wextra -Werror -std=c11" }
+    },
+    {
+      "name": "readability",
+      "analyzer": "llm_review",
+      "weight": 0.10,
+      "params": { "model": "llama3.1:8b", "temperature": 0.1 }
+    }
+  ]
+}

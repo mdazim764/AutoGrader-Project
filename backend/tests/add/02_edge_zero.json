@@ -1,0 +1,7 @@
+{
+  "id": "edge_zero",
+  "description": "Zero values",
+  "input": "0 0",
+  "expected": "0",
+  "complexity_size": 1
+}
