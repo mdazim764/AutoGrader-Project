@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Code, CheckCircle, XCircle, Brain, Timer } from 'lucide-react';
+import { LogOut, Code, CheckCircle, XCircle, Brain, Timer, AlertTriangle, UserCheck } from 'lucide-react';
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
@@ -224,6 +224,28 @@ export default function StudentDashboard() {
                       ))}
                     </div>
                   )
+                }
+
+                // 🚨 SPECIAL CASE: AI Plagiarism Detector Flag
+                if (metric.name === 'ai_detection') {
+                  const { is_ai, confidence, reason } = metric.details;
+                  return (
+                    <div key={idx} className={`p-4 rounded-lg border mt-4 animate-fade-in ${is_ai ? 'bg-red-950/20 border-red-900/50' : 'bg-teal-950/20 border-teal-900/50'}`}>
+                      <h4 className={`flex items-center gap-2 font-bold mb-2 ${is_ai ? 'text-red-400' : 'text-teal-400'}`}>
+                        {is_ai ? (
+                          <><AlertTriangle size={18} /> AI-Generated Code Flagged</>
+                        ) : (
+                          <><UserCheck size={18} /> Human-Written Code Verified</>
+                        )}
+                        <span className="text-xs font-normal opacity-70 px-2 py-0.5 bg-black/30 rounded-full">
+                          {confidence}% Confidence
+                        </span>
+                      </h4>
+                      <p className="text-sm text-gray-300">
+                        <span className="font-semibold opacity-80">AI Analysis:</span> {reason}
+                      </p>
+                    </div>
+                  );
                 }
                 
                 // Readability (LLM)
