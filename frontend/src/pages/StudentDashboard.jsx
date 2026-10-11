@@ -209,7 +209,7 @@ export default function StudentDashboard() {
                   );
                 }
                 
-                // Logical Cases
+           // Logical Cases
                 if (metric.name === 'logical') {
                   return (
                     <div key={idx} className="space-y-3">
@@ -222,6 +222,24 @@ export default function StudentDashboard() {
                           <span>{tc.passed ? '✅ Passed' : `❌ Failed (Got: ${tc.got})`}</span>
                         </div>
                       ))}
+
+                      {/* 🔥 NEW: AI DNA Tester & Counter Case Alert */}
+                      {metric.aiFeedback && (
+                        <div className="mt-4 p-4 bg-orange-950/30 border border-orange-900/50 rounded-lg animate-fade-in">
+                          <h5 className="font-bold text-orange-400 mb-2 flex items-center gap-2">
+                            <Brain size={16} /> AI Logic Hint & Counter Case
+                          </h5>
+                          <p className="text-sm text-gray-300 mb-3">{metric.aiFeedback.hint}</p>
+                          
+                          <div className="bg-black/40 p-3 rounded border border-orange-900/30 flex flex-col gap-1">
+                            <p className="text-xs text-orange-300/80 uppercase font-bold tracking-wider mb-1">🚨 Counter Test Case</p>
+                            <div className="flex gap-4 text-sm font-mono">
+                              <div><span className="text-gray-500">Input:</span> <span className="text-blue-300">"{metric.aiFeedback.counter_case.input}"</span></div>
+                              <div><span className="text-gray-500">Expected:</span> <span className="text-green-300">"{metric.aiFeedback.counter_case.expected}"</span></div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 }

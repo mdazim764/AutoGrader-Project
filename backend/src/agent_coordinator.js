@@ -22,7 +22,7 @@ if (!fs.existsSync(submissionsDir)) {
 }
 
 // ---------------------------------------------------------
-// AGENT 1: The First Pass (Compiler & Setup)
+// AGENT 1: The First Pass (Compiler & Setup with Fallback)
 // ---------------------------------------------------------
 async function runFirstPass(code, timeLimitSec) {
   const codePath = path.join(submissionsDir, "test.c");
@@ -30,19 +30,47 @@ async function runFirstPass(code, timeLimitSec) {
   fs.writeFileSync(codePath, code);
 
   return new Promise((resolve) => {
-    // gcc errors ko 2> operator use karke error.log me bhej rahe hain
+    // Attempt 1: Try compiling with AddressSanitizer (Memory Leak Detection)
     exec(
-      `gcc -O2 -Wall -Wextra -std=c11 "${codePath}" -o "${exePath}" 2> "${errorPath}"`,
+      `gcc -O2 -Wall -Wextra -std=c11 -fsanitize=address -g "${codePath}" -o "${exePath}" 2> "${errorPath}"`,
       (error, stdout, stderr) => {
         if (error) {
-          // Text file se exact error read karo
           const gccError = fs.readFileSync(errorPath, "utf-8");
-          console.log(`\n❌ GCC Compilation Error:\n${gccError}`); // Console me print
-          resolve({
-            success: false,
-            reason: "Compilation Failed",
-            output: gccError, // Ab ye 'output' variable me jayega
-          });
+
+          // Check if it failed specifically because MinGW is missing the ASAN library
+          if (gccError.includes("lasan") || gccError.includes("sanitize")) {
+            console.log(
+              "⚠️ MinGW ASAN not found. Falling back to standard compilation...",
+            );
+
+            // Attempt 2: Fallback to standard compilation without ASAN
+            exec(
+              `gcc -O2 -Wall -Wextra -std=c11 -g "${codePath}" -o "${exePath}" 2> "${errorPath}"`,
+              (fallbackError, fallbackStdout, fallbackStderr) => {
+                if (fallbackError) {
+                  const fallbackGccError = fs.readFileSync(errorPath, "utf-8");
+                  console.log(
+                    `\n❌ GCC Compilation Error:\n${fallbackGccError}`,
+                  );
+                  resolve({
+                    success: false,
+                    reason: "Compilation Failed",
+                    output: fallbackGccError,
+                  });
+                } else {
+                  resolve({ success: true, warnings: fallbackStderr });
+                }
+              },
+            );
+          } else {
+            // It's a genuine syntax error made by the student
+            console.log(`\n❌ GCC Compilation Error:\n${gccError}`);
+            resolve({
+              success: false,
+              reason: "Compilation Failed",
+              output: gccError,
+            });
+          }
         } else {
           resolve({ success: true, warnings: stderr });
         }
@@ -74,21 +102,31 @@ function generateEdgeCase(caseType) {
 }
 
 async function runLogicalAgent(casesToTest) {
-  // Safe check to prevent crash if test cases are undefined
   if (!casesToTest || !Array.isArray(casesToTest) || casesToTest.length === 0) {
     console.log("  ❌ Logical Agent Failed: No valid test cases provided.");
     return { score: 0, details: [] };
   }
 
-  // Ab casesToTest objects ka array hai, isliye string nikalne ke liye map() use karenge
-  const caseNames = casesToTest.map((c) => c.case).join(", ");
+  // ✅ FIX: Normalize casesToTest to ALWAYS be an array of objects
+  const normalizedCases = casesToTest
+    .map((c) => {
+      if (typeof c === "string") {
+        const generated = generateEdgeCase(c);
+        return generated
+          ? { case: c, input: generated.input, expected: generated.expected }
+          : null;
+      }
+      return c;
+    })
+    .filter(Boolean);
+
+  const caseNames = normalizedCases.map((c) => c.case).join(", ");
   console.log(`\n🕵️‍♂️ Logical Agent testing: ${caseNames}`);
 
   let score = 0;
   const details = [];
 
-  for (const testCase of casesToTest) {
-    // Ab generateEdgeCase() ki zaroorat nahi kyunki input/expected direct database se aarahe hain
+  for (const testCase of normalizedCases) {
     if (!testCase.input || !testCase.expected) continue;
 
     const result = await new Promise((resolve) => {
@@ -129,9 +167,62 @@ async function runLogicalAgent(casesToTest) {
   }
 
   return {
-    score: casesToTest.length > 0 ? score / casesToTest.length : 0,
+    score: normalizedCases.length > 0 ? score / normalizedCases.length : 0,
     details,
   };
+}
+
+// ---------------------------------------------------------
+// AGENT 2.5: Logical Error Explainer & Counter Case Generator
+// ---------------------------------------------------------
+async function analyzeLogicalFailure(code, failedCases) {
+  console.log(
+    `\n🧠 AI Agent generating explanations and counter test cases...`,
+  );
+  const cleanCode = String(code).replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+  const casesStr = JSON.stringify(failedCases);
+
+  const prompt = `You are an expert C programming TA. The student's code failed these logical cases:
+  ${casesStr}
+
+  Code:\n${cleanCode}
+
+  TASK:
+  1. Explain WHY the code failed (e.g., integer overflow, logic error).
+  2. Provide a conceptual hint.
+  3. Generate a NEW "Counter Test Case" (input and expected output) that proves this failure.
+
+  Return ONLY a strict JSON object: 
+  {
+    "explanation": "<Why it failed>",
+    "hint": "<How to fix it conceptually>",
+    "counter_case": {
+      "input": "<example input>",
+      "expected": "<expected output>"
+    }
+  }`;
+
+  try {
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama3.1:8b",
+        prompt: prompt,
+        stream: false,
+        format: "json",
+        options: { temperature: 0.1 },
+      }),
+    });
+    const data = await response.json();
+    return JSON.parse(data.response);
+  } catch (err) {
+    return {
+      explanation: "Logical error detected in edge cases.",
+      hint: "Check variable bounds and data types.",
+      counter_case: { input: "N/A", expected: "N/A" },
+    };
+  }
 }
 
 // ---------------------------------------------------------
@@ -442,11 +533,27 @@ async function gradeSubmission(submissionId) {
       const logicalResult = await runLogicalAgent(logicalRule.params.cases);
       const contribution = logicalResult.score * logicalRule.weight * 100;
       totalScore += contribution;
+
+      // 🔥 GENERATE COUNTER TEST CASE IF FAILED
+      let aiLogicalFeedback = null;
+      if (logicalResult.score < 1) {
+        const failedCases = logicalResult.details.filter((d) => !d.passed);
+        aiLogicalFeedback = await analyzeLogicalFailure(
+          submission.code,
+          failedCases,
+        );
+        console.log(`  💡 AI Hint: ${aiLogicalFeedback.hint}`);
+        console.log(
+          `  ⚠️ Counter Case: Input [${aiLogicalFeedback.counter_case.input}] -> Expected [${aiLogicalFeedback.counter_case.expected}]`,
+        );
+      }
+
       reportMetrics.push({
         name: "logical",
         score: logicalResult.score,
         contribution,
         details: logicalResult.details,
+        aiFeedback: aiLogicalFeedback, // Frontend me dikhane ke liye
       });
     }
 
