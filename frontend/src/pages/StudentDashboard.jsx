@@ -174,6 +174,40 @@ export default function StudentDashboard() {
 
               {/* Dynamic Metrics Rendering */}
               {result.report.metrics.map((metric, idx) => {
+
+                // 🚨 SPECIAL CASE: Compilation Error
+                if (metric.name === 'compilation_error') {
+                  return (
+                    <div key={idx} className="space-y-4 animate-fade-in">
+                      
+                      {/* Raw GCC Error Box */}
+                      <div className="bg-red-950/40 border border-red-900 rounded-lg p-4">
+                        <h4 className="flex items-center gap-2 font-bold text-red-500 mb-2 border-b border-red-900/50 pb-2">
+                          <XCircle size={18} /> Compilation Failed
+                        </h4>
+                        <pre className="text-xs font-mono text-red-300 whitespace-pre-wrap overflow-x-auto p-2 bg-black/30 rounded">
+                          {metric.details.rawError}
+                        </pre>
+                      </div>
+
+                      {/* AI Hints Box */}
+                      <div className="bg-orange-950/30 border border-orange-900/50 rounded-lg p-4">
+                        <h4 className="flex items-center gap-2 font-semibold text-orange-400 mb-3">
+                          <Brain size={18} /> AI Syntax Hints
+                        </h4>
+                        <ul className="list-disc list-inside space-y-2 text-sm text-gray-300 mb-4">
+                          {metric.details.aiHints.map((hint, hIdx) => (
+                            <li key={hIdx}>{hint}</li>
+                          ))}
+                        </ul>
+                        <div className="text-sm italic text-orange-300/80 bg-orange-950/50 p-2 rounded border border-orange-900/30">
+                          {metric.details.encouragement}
+                        </div>
+                      </div>
+                      
+                    </div>
+                  );
+                }
                 
                 // Logical Cases
                 if (metric.name === 'logical') {

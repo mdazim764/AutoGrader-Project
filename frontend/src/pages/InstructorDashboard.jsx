@@ -43,13 +43,23 @@ export default function InstructorDashboard() {
     setTimeLimit(p.timeLimitSec);
     setMemoryLimit(p.memoryLimitMb);
     
-    // ✅ FIX: Safe JSON Parsing (In case Database returns a string)
     let rulesObj = p.rules;
-    if (typeof rulesObj === 'string') {
-      try { rulesObj = JSON.parse(rulesObj); } catch(err) { console.error("JSON Parse Error"); }
+    
+    // Deeply parse the JSON object returned from Supabase
+    try {
+      if (typeof rulesObj === 'string') {
+        rulesObj = JSON.parse(rulesObj);
+      }
+      
+      // Additional safety check: If metrics inside rules is a string
+      if (rulesObj?.metrics && typeof rulesObj.metrics === 'string') {
+         rulesObj.metrics = JSON.parse(rulesObj.metrics);
+      }
+    } catch(err) { 
+      console.error("Deep JSON Parse Error", err); 
     }
 
-    // Load Complexity
+    // Load Complexity safely
     const compRule = rulesObj?.metrics?.find(m => m.name === 'complexity');
     if (compRule && compRule.params?.required) {
       setComplexity(compRule.params.required);
@@ -57,12 +67,13 @@ export default function InstructorDashboard() {
       setComplexity('O(1)');
     }
     
-    // Load Logical Cases safely
+    // Load Logical Cases safely - checking for both 'cases' and 'testCases' 
     const logicalRule = rulesObj?.metrics?.find(m => m.name === 'logical');
-    if (logicalRule?.params?.cases && logicalRule.params.cases.length > 0) {
+    
+    if (logicalRule?.params?.cases && Array.isArray(logicalRule.params.cases) && logicalRule.params.cases.length > 0) {
       setTestCases(logicalRule.params.cases);
-    } else if (logicalRule?.params?.testCases && logicalRule.params.testCases.length > 0) {
-      setTestCases(logicalRule.params.testCases); // Fallback for older entries
+    } else if (logicalRule?.params?.testCases && Array.isArray(logicalRule.params.testCases) && logicalRule.params.testCases.length > 0) {
+      setTestCases(logicalRule.params.testCases);
     } else {
       setTestCases([{ case: 'basic', input: '', expected: '' }]);
     }
