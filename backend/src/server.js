@@ -1,24 +1,19 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { Pool } = require("pg");
-const { PrismaPg } = require("@prisma/adapter-pg");
-const { PrismaClient } = require("@prisma/client");
-const { gradeSubmission } = require("./agent_coordinator"); // Importing our Agent
-
+const prisma = require("./db");
+const { gradeSubmission } = require("./services/agent_coordinator"); // Importing our Agent
+const { authenticate, isInstructor } = require("./middlewares/auth.middleware");
 const app = express();
 const PORT = 5000;
-
+const jwt = require("jsonwebtoken");
+const authRoutes = require("./routes/auth.routes");
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Prisma Initialization (v7 standard)
-const connectionString = process.env.DATABASE_URL;
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
-
+// auth routes
+app.use("/api/auth", authRoutes);
 // ==========================================
 // 1. INSTRUCTOR & STUDENT: Get All Problems
 // ==========================================
@@ -42,21 +37,16 @@ app.get("/api/problems", async (req, res) => {
 // ==========================================
 // 2. INSTRUCTOR: Create a New Problem
 // ==========================================
-app.post("/api/problems", async (req, res) => {
+app.post("/api/problems", authenticate, isInstructor, async (req, res) => {
   try {
-    // Fetching the first INSTRUCTOR for dummy auth
-    const instructor = await prisma.user.findFirst({
-      where: { role: "INSTRUCTOR" },
-    });
-
     const newProblem = await prisma.problem.create({
       data: {
         title: req.body.title,
         statement: req.body.statement,
         timeLimitSec: req.body.timeLimitSec || 1,
         memoryLimitMb: req.body.memoryLimitMb || 64,
-        rules: req.body.rules, // Dynamic JSON Rules
-        instructorId: instructor.id,
+        rules: req.body.rules,
+        instructorId: req.user.id,
       },
     });
     res.json({ message: "Problem created successfully!", problem: newProblem });
@@ -82,7 +72,7 @@ app.put("/api/problems/:id", async (req, res) => {
 // ==========================================
 // 3. STUDENT: Submit Code
 // ==========================================
-app.post("/api/submissions", async (req, res) => {
+app.post("/api/submissions", authenticate, async (req, res) => {
   try {
     const { problemId, code } = req.body;
     if (!problemId || !code)
@@ -97,7 +87,7 @@ app.post("/api/submissions", async (req, res) => {
     const submission = await prisma.submission.create({
       data: {
         problemId: problemId,
-        studentId: student.id,
+        studentId: req.user.id,
         code: code,
         status: "PENDING",
       },
@@ -133,6 +123,24 @@ app.get("/api/submissions/:id", async (req, res) => {
     res.json(submission);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch submission details." });
+  }
+});
+
+// ==========================================
+// 5. INSTRUCTOR: Get All Submissions (For Analytics)
+// ==========================================
+app.get("/api/submissions", authenticate, async (req, res) => {
+  try {
+    const submissions = await prisma.submission.findMany({
+      include: {
+        student: { select: { name: true, email: true } },
+        problem: { select: { title: true } },
+      },
+      orderBy: { createdAt: "desc" }, // Sabse latest pehle aayega
+    });
+    res.json(submissions);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch all submissions." });
   }
 });
 

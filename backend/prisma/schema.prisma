@@ -3,16 +3,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // Supabase uses PostgreSQL
+  provider = "postgresql" 
 }
 
-// 1. Roles Enum (Instructor vs Student)
 enum Role {
   INSTRUCTOR
   STUDENT
 }
 
-// 2. Submission Status Enum
 enum Status {
   PENDING
   GRADING
@@ -20,53 +18,75 @@ enum Status {
   FAILED
 }
 
-// 3. User Table
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  role      Role     @default(STUDENT)
-  createdAt DateTime @default(now())
-
-  // Relations
-  problems    Problem[]    // Problems created by instructor
-  submissions Submission[] // Submissions made by student
+// 1. NEW: Course/Classroom Table
+model Course {
+  id           String    @id @default(uuid())
+  name         String    // e.g., "Design and Analysis of Algorithms"
+  code         String    @unique // e.g., "CS5101"
+  
+  instructorId String
+  instructor   User      @relation("CourseInstructor", fields: [instructorId], references: [id])
+  
+  students     User[]    @relation("CourseStudents") // Enrolled students
+  problems     Problem[] // Assignments in this course
+  
+  createdAt    DateTime  @default(now())
 }
 
-// 4. Problem Table (Instructor Side)
+// 2. User Table (Updated with Auth & Course Relations)
+model User {
+  id              String   @id @default(uuid())
+  name            String
+  email           String   @unique
+  password        String   // For JWT Auth
+  role            Role     @default(STUDENT)
+  createdAt       DateTime @default(now())
+
+  // Relations
+  coursesTaught   Course[] @relation("CourseInstructor")
+  coursesEnrolled Course[] @relation("CourseStudents")
+  problems        Problem[]
+  submissions     Submission[]
+}
+
+// 3. Problem Table (Updated with Course Link)
 model Problem {
   id              String   @id @default(uuid())
-  title           String   // e.g., "Add Two Integers"
-  statement       String   // Full description of the problem
+  title           String   
+  statement       String   
   timeLimitSec    Int      @default(1)
   memoryLimitMb   Int      @default(64)
-  
-  // 🔥 THE GAME CHANGER: JSONB Column
-  // Isme instructor ke saare dynamic rules, weights, aur test cases aayenge
   rules           Json     
   
   instructorId    String
   instructor      User     @relation(fields: [instructorId], references: [id])
-  createdAt       DateTime @default(now())
+  
+  courseId        String?
+  course          Course?  @relation(fields: [courseId], references: [id])
 
-  // Relations
+  createdAt       DateTime @default(now())
   submissions     Submission[]
 }
 
-// 5. Submission Table (Student & Agent Side)
+// 4. Submission Table (THE BIG UPGRADE)
 model Submission {
-  id          String   @id @default(uuid())
-  code        String   // Student's raw C code
-  status      Status   @default(PENDING)
-  finalScore  Float?   // Out of 100
+  id              String   @id @default(uuid())
+  code            String   
+  status          Status   @default(PENDING)
+  finalScore      Float?   
+  report          Json?    
   
-  // 🔥 THE REPORT: JSONB Column
-  // Isme Agent apni puri kundli (time complexity, AI feedback, test results) daalega
-  report      Json?    
+  // 🔥 NEW: Analytics & Plagiarism Engine
+  attemptNumber   Int      @default(1)
+  isPlagiarized   Boolean  @default(false)
+  plagiarismScore Float?   // Percentage e.g., 96.5
+  matchedWithId   String?  // ID of the submission it was copied from
+  matchedWith     Submission?  @relation("PlagiarismMatch", fields: [matchedWithId], references: [id])
+  plagiarismMatches Submission[] @relation("PlagiarismMatch") // Reverse relation for tracking
   
-  studentId   String
-  student     User     @relation(fields: [studentId], references: [id])
-  problemId   String
-  problem     Problem  @relation(fields: [problemId], references: [id])
-  createdAt   DateTime @default(now())
+  studentId       String
+  student         User     @relation(fields: [studentId], references: [id])
+  problemId       String
+  problem         Problem  @relation(fields: [problemId], references: [id])
+  createdAt       DateTime @default(now())
 }
