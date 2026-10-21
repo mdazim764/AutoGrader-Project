@@ -83,22 +83,31 @@ app.post("/api/submissions", authenticate, async (req, res) => {
     // Fetching the first STUDENT for dummy auth
     const student = await prisma.user.findFirst({ where: { role: "STUDENT" } });
 
-    // 1. Save submission to DB as PENDING
+    // 1. Check previous attempts
+    const previousAttempts = await prisma.submission.count({
+      where: {
+        studentId: req.user.id,
+        problemId: problemId,
+      },
+    });
+
+    // 2. Save submission to DB as PENDING
     const submission = await prisma.submission.create({
       data: {
         problemId: problemId,
         studentId: req.user.id,
         code: code,
         status: "PENDING",
+        attemptNumber: previousAttempts + 1,
       },
     });
 
-    // 2. Trigger the Agentic AutoGrader in the background (Do not await!)
+    // 3. Trigger the Agentic AutoGrader in the background (Do not await!)
     gradeSubmission(submission.id).catch((err) =>
       console.error("Agent Error:", err),
     );
 
-    // 3. Return immediate response to Frontend
+    // 4. Return immediate response to Frontend
     res.json({
       message: "Submission received. Agent is grading...",
       submissionId: submission.id,
@@ -135,8 +144,13 @@ app.get("/api/submissions", authenticate, async (req, res) => {
       include: {
         student: { select: { name: true, email: true } },
         problem: { select: { title: true } },
+        matchedWith: {
+          select: {
+            student: { select: { name: true } },
+          },
+        },
       },
-      orderBy: { createdAt: "desc" }, // Sabse latest pehle aayega
+      orderBy: { createdAt: "desc" },
     });
     res.json(submissions);
   } catch (error) {
