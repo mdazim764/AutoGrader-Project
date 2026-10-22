@@ -1,4 +1,4 @@
-const { gradeSubmission } = require("../services/agent_coordinator");
+const { gradeSubmission } = require("../services/grading-orchestrator.service");
 
 function enqueue(submissionId) {
   return gradeSubmission(submissionId);
