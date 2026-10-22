@@ -1,15 +1,14 @@
-// Backend: Get All Submissions (For Instructor Analytics)
-app.get("/api/submissions", authenticate, async (req, res) => {
-  try {
-    const submissions = await prisma.submission.findMany({
-      include: {
-        student: { select: { name: true, email: true } },
-        problem: { select: { title: true } },
-      },
-      orderBy: { createdAt: "desc" }, // Sabse latest pehle aayega
-    });
-    res.json(submissions);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch submissions." });
-  }
-});
+const express = require("express");
+const router = express.Router();
+const { authenticate } = require("../middlewares/auth.middleware");
+const {
+  createSubmission,
+  getSubmission,
+  listSubmissions,
+} = require("../controllers/submission.controller");
+
+router.post("/", authenticate, createSubmission);
+router.get("/:id", getSubmission);
+router.get("/", authenticate, listSubmissions);
+
+module.exports = router;

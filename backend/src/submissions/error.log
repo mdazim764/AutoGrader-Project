@@ -1,0 +1,10 @@
+E:\AutoGrader-Project\backend\src\submissions\test.c: In function 'main':
+E:\AutoGrader-Project\backend\src\submissions\test.c:5:14: warning: unknown conversion type character 'l' in format [-Wformat=]
+     scanf("%lld %lld", &a, &b);
+              ^
+E:\AutoGrader-Project\backend\src\submissions\test.c:5:19: warning: unknown conversion type character 'l' in format [-Wformat=]
+     scanf("%lld %lld", &a, &b);
+                   ^
+E:\AutoGrader-Project\backend\src\submissions\test.c:5:11: warning: too many arguments for format [-Wformat-extra-args]
+     scanf("%lld %lld", &a, &b);
+           ^~~~~~~~~~~
