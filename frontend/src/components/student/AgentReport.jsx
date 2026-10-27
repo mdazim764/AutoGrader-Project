@@ -22,6 +22,8 @@ export default function AgentReport({ result, loading, error }) {
     );
   }
 
+  const metrics = Array.isArray(result.report?.metrics) ? result.report.metrics : [];
+
   return (
     <div className="space-y-6 overflow-y-auto pr-2 pb-4">
       
@@ -29,11 +31,17 @@ export default function AgentReport({ result, loading, error }) {
       <div className="bg-gray-950 p-6 rounded-xl border border-gray-800 text-center">
         <p className="text-gray-400 text-sm font-semibold uppercase tracking-wider mb-1">Final Score</p>
         <h3 className={`text-5xl font-extrabold ${result.finalScore >= 80 ? 'text-green-400' : result.finalScore >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-          {Math.round(result.finalScore)}<span className="text-2xl text-gray-600">/100</span>
+          {result.finalScore === null || result.finalScore === undefined ? '--' : Math.round(result.finalScore)}<span className="text-2xl text-gray-600">/100</span>
         </h3>
       </div>
 
-      {result.report.metrics.map((metric, idx) => {
+      {result.status === 'FAILED' && (
+        <div className="rounded-lg border border-red-800 bg-red-950/30 p-4 text-sm text-red-300">
+          Grading failed before a complete report could be generated. Please review the submission status or try again.
+        </div>
+      )}
+
+      {metrics.map((metric, idx) => {
         
         // 1. Compilation Error
         if (metric.name === 'compilation_error') {

@@ -1,15 +1,19 @@
-import { Code } from 'lucide-react';
+import { Code, FileCode2 } from 'lucide-react';
 
 export default function CodeEditor({ code, setCode }) {
   return (
-    <div className="flex-1 flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-      <div className="bg-gray-800 px-4 py-3 border-b border-gray-700 flex items-center gap-2">
-        <Code size={18} className="text-blue-400" />
-        <span className="font-semibold text-sm">main.c</span>
+    <div className="flex min-h-[600px] flex-1 flex-col overflow-hidden rounded-2xl border border-indigo-400/20 bg-slate-950 shadow-xl shadow-black/30 xl:min-h-[680px]">
+      <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/90 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Code size={18} className="text-indigo-300" />
+          <span className="text-sm font-semibold text-slate-200">main.c</span>
+        </div>
+        <span className="flex items-center gap-1.5 text-xs text-slate-500"><FileCode2 size={14} /> C11</span>
       </div>
       <textarea
-        className="flex-1 w-full p-4 bg-transparent font-mono text-sm focus:outline-none resize-none text-gray-300"
-        rows="16"
+        aria-label="C source code editor"
+        className="min-h-[390px] w-full flex-1 resize-none bg-transparent p-5 font-mono text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-inset focus:ring-indigo-500/40"
+        rows="20" // 🔥 Changed from 16 to 20 for more space
         value={code}
         onChange={(e) => setCode(e.target.value)}
         spellCheck="false"

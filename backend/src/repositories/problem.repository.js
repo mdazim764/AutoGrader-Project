@@ -8,6 +8,7 @@ function findAllPublic() {
       statement: true,
       timeLimitSec: true,
       memoryLimitMb: true,
+      rules: true,
     },
   });
 }

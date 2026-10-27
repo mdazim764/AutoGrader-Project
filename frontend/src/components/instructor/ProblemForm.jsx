@@ -1,160 +1,176 @@
-import { useState, useEffect } from 'react';
-import { Plus, Save, Trash2, Database, Edit3 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BookOpen, CheckCircle2, FileText, Plus, Save, Settings2, Trash2 } from 'lucide-react';
 import { problemAPI } from '../../api/services';
 
+const generatedCases = {
+  basic: { input: '10 20', expected: '30' },
+  zero: { input: '0 0', expected: '0' },
+  negatives: { input: '-50 -150', expected: '-200' },
+  int_overflow: { input: '2147483647 1', expected: '-2147483648' },
+};
+
+const emptyCase = () => ({ case: 'custom', input: '', expected: '' });
+
+function parseRules(value) {
+  let rules = value;
+  try {
+    if (typeof rules === 'string') rules = JSON.parse(rules);
+    if (typeof rules?.metrics === 'string') rules = { ...rules, metrics: JSON.parse(rules.metrics) };
+  } catch {
+    return {};
+  }
+  return rules || {};
+}
+
+function normalizeCase(value) {
+  if (typeof value !== 'string') return { ...value, case: value.case || 'custom', input: value.input ?? '', expected: value.expected ?? '' };
+  return { case: value, ...(generatedCases[value] || {}) };
+}
+
 export default function ProblemForm() {
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
   const [allProblems, setAllProblems] = useState([]);
   const [selectedId, setSelectedId] = useState('');
-
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
   const [timeLimit, setTimeLimit] = useState(1);
   const [memoryLimit, setMemoryLimit] = useState(64);
   const [complexity, setComplexity] = useState('O(1)');
-  const [testCases, setTestCases] = useState([{ case: 'basic', input: '', expected: '' }]);
+  const [testCases, setTestCases] = useState([emptyCase()]);
 
-  const loadProblems = () => {
-    problemAPI.getAll().then(res => setAllProblems(res.data)).catch(console.error);
+  const selectedProblem = useMemo(() => allProblems.find((problem) => problem.id === selectedId), [allProblems, selectedId]);
+
+  const loadProblems = async () => {
+    try {
+      const { data } = await problemAPI.getAll();
+      setAllProblems(data);
+    } catch {
+      setMessage({ type: 'error', text: 'Unable to load problems.' });
+    }
   };
 
+  // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { loadProblems(); }, []);
 
-const handleSelectProblem = (e) => {
-    const id = e.target.value;
+  const resetForm = () => {
+    setSelectedId('');
+    setTitle('');
+    setStatement('');
+    setTimeLimit(1);
+    setMemoryLimit(64);
+    setComplexity('O(1)');
+    setTestCases([emptyCase()]);
+    setMessage(null);
+  };
+
+  const handleSelectProblem = (event) => {
+    const id = event.target.value;
     setSelectedId(id);
-    setMessage('');
-    
+    setMessage(null);
     if (!id) {
-      setTitle(''); setStatement(''); setTimeLimit(1); setMemoryLimit(64); setComplexity('O(1)');
-      setTestCases([{ case: 'basic', input: '', expected: '' }]);
+      resetForm();
       return;
     }
 
-    const p = allProblems.find(x => x.id === id);
-    setTitle(p.title); 
-    setStatement(p.statement); 
-    setTimeLimit(p.timeLimitSec); 
-    setMemoryLimit(p.memoryLimitMb);
-    
-    let rulesObj = p.rules;
-    
-    try { 
-      // Deep parsing: Supabase JSON ko string ki tarah return kar sakta hai
-      if (typeof rulesObj === 'string') rulesObj = JSON.parse(rulesObj); 
-      if (rulesObj?.metrics && typeof rulesObj.metrics === 'string') {
-        rulesObj.metrics = JSON.parse(rulesObj.metrics);
-      }
-    } catch(err) {
-      console.error("Parse Error:", err);
-    }
+    const problem = allProblems.find((item) => item.id === id);
+    const rules = parseRules(problem?.rules);
+    const metrics = Array.isArray(rules.metrics) ? rules.metrics : [];
+    const logical = metrics.find((metric) => metric.name === 'logical');
+    const complexityRule = metrics.find((metric) => metric.name === 'complexity');
 
-    // Load Complexity
-    const compRule = rulesObj?.metrics?.find(m => m.name === 'complexity');
-    setComplexity(compRule?.params?.required || 'O(1)');
-    
-    // 🔥 FIX: Extracting Logical Cases safely
-    const logicalRule = rulesObj?.metrics?.find(m => m.name === 'logical');
-    
-    if (logicalRule?.params?.cases && Array.isArray(logicalRule.params.cases)) {
-      // Backend test cases return as objects { case: 'basic', input: '10', expected: '10' }
-      // Humhe unko as it is set karna hai
-      setTestCases(logicalRule.params.cases.map(tc => {
-        return typeof tc === 'string' ? { case: tc, input: '', expected: '' } : tc;
-      }));
-    } else {
-      setTestCases([{ case: 'basic', input: '', expected: '' }]);
-    }
+    setTitle(problem?.title || '');
+    setStatement(problem?.statement || '');
+    setTimeLimit(problem?.timeLimitSec || 1);
+    setMemoryLimit(problem?.memoryLimitMb || 64);
+    setComplexity(complexityRule?.params?.required || 'O(1)');
+    setTestCases(Array.isArray(logical?.params?.cases) && logical.params.cases.length
+      ? logical.params.cases.map(normalizeCase)
+      : [emptyCase()]);
   };
 
-  const handleAddTestCase = () => setTestCases([...testCases, { case: 'custom', input: '', expected: '' }]);
-  const handleRemoveTestCase = (index) => setTestCases(testCases.filter((_, i) => i !== index));
   const handleChangeTestCase = (index, field, value) => {
-    const updated = [...testCases];
-    updated[index][field] = value;
-    setTestCases(updated);
+    setTestCases((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true); setMessage('');
-
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(null);
     const payload = {
-      title, statement, timeLimitSec: Number(timeLimit), memoryLimitMb: Number(memoryLimit),
+      title: title.trim(),
+      statement: statement.trim(),
+      timeLimitSec: Number(timeLimit),
+      memoryLimitMb: Number(memoryLimit),
       rules: {
         metrics: [
-          { name: "logical", weight: 0.40, params: { cases: testCases } },
-          { name: "readability", weight: 0.20, params: { model: "llama3.1:8b", temperature: 0 } },
-          { name: "complexity", weight: 0.40, params: { required: complexity } }
-        ]
-      }
+          { name: 'logical', weight: 0.4, params: { cases: testCases } },
+          { name: 'readability', weight: 0.2, params: { model: 'llama3.1:8b', temperature: 0 } },
+          { name: 'complexity', weight: 0.4, params: { required: complexity } },
+        ],
+      },
     };
 
     try {
       if (selectedId) {
         await problemAPI.update(selectedId, payload);
-        setMessage('✅ Problem updated successfully!');
+        setMessage({ type: 'success', text: 'Problem updated successfully.' });
       } else {
         await problemAPI.create(payload);
-        setMessage('✅ New problem deployed!');
-        loadProblems(); // Refresh list
+        setMessage({ type: 'success', text: 'New problem created successfully.' });
+        await loadProblems();
       }
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.error || 'Unable to save problem.' });
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="bg-gray-900 p-4 rounded-xl border border-gray-800 flex items-center gap-4 shadow-sm">
-        <Edit3 className="text-indigo-400" />
-        <div className="flex-1">
-          <label className="text-sm text-gray-400 block mb-1">Mode: Create New or Edit Existing?</label>
-          <select value={selectedId} onChange={handleSelectProblem} className="w-full bg-gray-950 border border-gray-700 text-white rounded p-2 outline-none">
-            <option value="">✨ -- Create New Problem -- ✨</option>
-            {allProblems.map(p => <option key={p.id} value={p.id}>Edit: {p.title}</option>)}
-          </select>
-        </div>
+    <div className="mx-auto max-w-6xl">
+      <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-800 bg-gradient-to-r from-indigo-950/60 to-slate-900 p-6 shadow-xl shadow-black/10 md:flex-row md:items-center md:justify-between">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Assignment studio</p><h2 className="mt-2 text-2xl font-bold">Design a coding challenge</h2><p className="mt-1 text-sm text-slate-400">Configure the statement, limits, rubric, and public examples.</p></div>
+        <div className="flex items-center gap-3"><span className="rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-2 text-sm text-slate-300">{allProblems.length} problem{allProblems.length === 1 ? '' : 's'}</span><button type="button" onClick={resetForm} className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-200 transition hover:bg-indigo-500/20"><Plus size={15} className="mr-1 inline" /> New problem</button></div>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Editing mode</label>
+        <select value={selectedId} onChange={handleSelectProblem} disabled={saving} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20">
+          <option value="">Create a new problem</option>
+          {allProblems.map((problem) => <option key={problem.id} value={problem.id}>Edit: {problem.title}</option>)}
+        </select>
+        {selectedProblem && <p className="mt-2 text-xs text-slate-500">Editing the saved version of <strong className="text-slate-300">{selectedProblem.title}</strong>. Test-case values are loaded from its logical rubric.</p>}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 space-y-4">
-          <h2 className="text-lg font-semibold border-b border-gray-800 pb-2 flex items-center gap-2"><Database size={18} className="text-indigo-400"/> General Info</h2>
-          <div><label className="block text-sm text-gray-400 mb-1">Title</label><input required value={title} onChange={e => setTitle(e.target.value)} type="text" className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2 outline-none" /></div>
-          <div><label className="block text-sm text-gray-400 mb-1">Statement</label><textarea required value={statement} onChange={e => setStatement(e.target.value)} rows="3" className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2 outline-none resize-none"></textarea></div>
-          <div className="flex gap-4">
-            <div className="flex-1"><label className="block text-sm text-gray-400 mb-1">Time (sec)</label><input required value={timeLimit} onChange={e => setTimeLimit(e.target.value)} type="number" min="1" className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2 outline-none" /></div>
-            <div className="flex-1"><label className="block text-sm text-gray-400 mb-1">Memory (MB)</label><input required value={memoryLimit} onChange={e => setMemoryLimit(e.target.value)} type="number" min="16" className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2 outline-none" /></div>
-            <div className="flex-1">
-              <label className="block text-sm text-gray-400 mb-1">Target Complexity</label>
-              <select value={complexity} onChange={e => setComplexity(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2.5 outline-none">
-                <option value="O(1)">O(1) - Constant</option><option value="O(log N)">O(log N) - Logarithmic</option><option value="O(N)">O(N) - Linear</option><option value="O(N^2)">O(N^2) - Quadratic</option>
-              </select>
-            </div>
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-black/10">
+          <div className="mb-5 flex items-center gap-3 border-b border-slate-800 pb-4"><div className="rounded-xl bg-indigo-500/15 p-2 text-indigo-300"><FileText size={19} /></div><div><h3 className="font-bold">Problem content</h3><p className="text-xs text-slate-500">Give students a precise, actionable prompt.</p></div></div>
+          <div className="space-y-4">
+            <label className="block text-sm text-slate-300">Title<input required value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400" placeholder="e.g. Add Two Integers Safely" /></label>
+            <label className="block text-sm text-slate-300">Statement<textarea required value={statement} onChange={(event) => setStatement(event.target.value)} rows="5" className="mt-2 w-full resize-y rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 leading-6 text-white outline-none focus:border-indigo-400" placeholder="Describe the input, expected output, and constraints." /></label>
           </div>
-        </div>
+        </section>
 
-        <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 space-y-4">
-          <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-            <h2 className="text-lg font-semibold">Test Cases</h2>
-            <button type="button" onClick={handleAddTestCase} className="text-sm flex items-center gap-1 bg-gray-800 px-3 py-1 rounded text-indigo-300"><Plus size={14} /> Add Case</button>
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-black/10">
+          <div className="mb-5 flex items-center gap-3 border-b border-slate-800 pb-4"><div className="rounded-xl bg-cyan-500/15 p-2 text-cyan-300"><Settings2 size={19} /></div><div><h3 className="font-bold">Execution rubric</h3><p className="text-xs text-slate-500">Set constraints used by the grader.</p></div></div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="block text-sm text-slate-300">Time limit (seconds)<input required min="1" type="number" value={timeLimit} onChange={(event) => setTimeLimit(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400" /></label>
+            <label className="block text-sm text-slate-300">Memory limit (MB)<input required min="16" type="number" value={memoryLimit} onChange={(event) => setMemoryLimit(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400" /></label>
+            <label className="block text-sm text-slate-300">Target complexity<select value={complexity} onChange={(event) => setComplexity(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400"><option>O(1)</option><option>O(log N)</option><option>O(N)</option><option>O(N^2)</option></select></label>
           </div>
-          {testCases.map((tc, idx) => (
-            <div key={idx} className="flex gap-4 bg-gray-950 p-4 rounded-lg border border-gray-800">
-              <div className="flex-1"><input placeholder="Name" required value={tc.case} onChange={e => handleChangeTestCase(idx, 'case', e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 outline-none" /></div>
-              <div className="flex-1"><input placeholder="Input" required value={tc.input} onChange={e => handleChangeTestCase(idx, 'input', e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 outline-none font-mono" /></div>
-              <div className="flex-1"><input placeholder="Expected" required value={tc.expected} onChange={e => handleChangeTestCase(idx, 'expected', e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 outline-none font-mono" /></div>
-              {testCases.length > 1 && <button type="button" onClick={() => handleRemoveTestCase(idx)} className="text-red-400"><Trash2 size={18} /></button>}
-            </div>
-          ))}
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold text-white shadow-md flex justify-center gap-2">
-          {loading ? 'Saving...' : <><Save size={20} /> {selectedId ? 'Update Problem' : 'Deploy New Problem'}</>}
-        </button>
-        {message && <div className={`p-4 rounded-lg text-center font-semibold border ${message.includes('✅') ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-red-900/30 text-red-400 border-red-800'}`}>{message}</div>}
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-black/10">
+          <div className="mb-5 flex flex-col gap-3 border-b border-slate-800 pb-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><div className="rounded-xl bg-emerald-500/15 p-2 text-emerald-300"><BookOpen size={19} /></div><div><h3 className="font-bold">Public test cases</h3><p className="text-xs text-slate-500">Students see these examples before submitting.</p></div></div><button type="button" onClick={() => setTestCases((current) => [...current, emptyCase()])} className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/20"><Plus size={15} className="mr-1 inline" /> Add test case</button></div>
+          <div className="space-y-3">
+            {testCases.map((testCase, index) => <div key={`${testCase.case}-${index}`} className="rounded-xl border border-slate-800 bg-slate-950/70 p-4"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Case {index + 1}</span><button type="button" onClick={() => setTestCases((current) => current.filter((_, itemIndex) => itemIndex !== index))} disabled={testCases.length === 1} className="rounded-lg p-2 text-rose-400 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Remove test case ${index + 1}`}><Trash2 size={16} /></button></div><div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr_1.2fr]"><input required value={testCase.case} onChange={(event) => handleChangeTestCase(index, 'case', event.target.value)} placeholder="Case name" className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-400" /><textarea required value={testCase.input} onChange={(event) => handleChangeTestCase(index, 'input', event.target.value)} placeholder="Input" rows="2" className="resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono text-sm text-sky-200 outline-none focus:border-indigo-400" /><textarea required value={testCase.expected} onChange={(event) => handleChangeTestCase(index, 'expected', event.target.value)} placeholder="Expected output" rows="2" className="resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono text-sm text-emerald-200 outline-none focus:border-indigo-400" /></div></div>)}
+          </div>
+          <p className="mt-4 text-xs text-slate-500">Use the exact whitespace and line breaks expected from the program output.</p>
+        </section>
+
+        {message && <div className={`flex items-center gap-2 rounded-xl border p-4 text-sm ${message.type === 'success' ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-rose-400/20 bg-rose-500/10 text-rose-300'}`}><CheckCircle2 size={17} />{message.text}</div>}
+        <button type="submit" disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"><Save size={18} />{saving ? 'Saving problem...' : selectedId ? 'Update problem' : 'Create problem'}</button>
       </form>
     </div>
   );

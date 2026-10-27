@@ -46,14 +46,19 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4 font-sans">
-      <div className="max-w-md w-full bg-gray-900 border border-gray-800 rounded-xl shadow-2xl p-8 text-center">
-        <Code2 className="w-16 h-16 text-blue-500 mx-auto mb-6" />
-        <h1 className="text-3xl font-bold text-white mb-2">Agentic AutoGrader</h1>
-        <p className="text-gray-400 mb-8">Sign in to your account</p>
+    <div className="flex min-h-screen items-center justify-center bg-[#070b16] p-4 font-sans">
+      <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-black/40 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="hidden flex-col justify-between bg-gradient-to-br from-indigo-600 via-violet-600 to-slate-950 p-10 lg:flex">
+          <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-100">Agentic AutoGrader</p><h1 className="mt-8 max-w-md text-4xl font-bold leading-tight text-white">Make every submission a learning moment.</h1><p className="mt-5 max-w-md leading-7 text-indigo-100/80">Compile, test, and understand your code with structured feedback designed for the classroom.</p></div>
+          <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-sm text-indigo-50">Deterministic tests. Actionable feedback. Better learning.</div>
+        </div>
+        <div className="p-7 text-center sm:p-10">
+        <Code2 className="mx-auto mb-6 h-14 w-14 text-indigo-400" />
+        <h1 className="text-3xl font-bold text-white">Welcome back</h1>
+        <p className="mb-8 mt-2 text-slate-400">Sign in to continue to your workspace</p>
         
         {error && (
-          <div className="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6 text-sm">
+          <div className="mb-6 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-300">
             {error}
           </div>
         )}
@@ -66,7 +71,7 @@ export default function Login() {
               placeholder="Email address"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-gray-800 text-white border border-gray-700 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/80 py-3 pl-10 pr-4 text-white outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20"
               required
             />
           </div>
@@ -78,7 +83,7 @@ export default function Login() {
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-800 text-white border border-gray-700 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/80 py-3 pl-10 pr-4 text-white outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20"
               required
             />
           </div>
@@ -86,11 +91,12 @@ export default function Login() {
           <button 
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white py-3 rounded-lg font-semibold transition-all shadow-lg mt-4"
+            className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-indigo-500 py-3 font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? 'Signing in...' : 'Login'}
           </button>
         </form>
+        </div>
       </div>
     </div>
   );
