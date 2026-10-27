@@ -16,10 +16,36 @@
       "params": { "flags": "-Wall -Wextra -Werror -std=c11" }
     },
     {
+      "name": "logical",
+      "analyzer": "edge_case_runner",
+      "weight": 0.20,
+      "params": {
+        "cases": ["basic", "zero", "negatives", "int_overflow"]
+      }
+    },
+    {
+      "name": "complexity",
+      "analyzer": "complexity_estimator",
+      "weight": 0.15,
+      "params": { "required": "O(1)" }
+    },
+    {
+      "name": "memory_safety",
+      "analyzer": "sanitizer_run",
+      "weight": 0.15,
+      "params": { "sanitizers": ["address", "undefined"] }
+    },
+    {
       "name": "readability",
       "analyzer": "llm_review",
       "weight": 0.10,
       "params": { "model": "llama3.1:8b", "temperature": 0.1 }
+    },
+    {
+      "name": "originality",
+      "analyzer": "similarity_flag",
+      "weight": 0.10,
+      "params": { "threshold": 0.85 }
     }
   ]
 }

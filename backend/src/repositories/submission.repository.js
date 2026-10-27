@@ -11,7 +11,14 @@ function create(data) {
 function findByIdWithProblem(id) {
   return prisma.submission.findUnique({
     where: { id },
-    include: { problem: { select: { title: true } } },
+    include: { problem: { select: { title: true, instructorId: true } } },
+  });
+}
+
+function claimForGrading(id) {
+  return prisma.submission.updateMany({
+    where: { id, status: "PENDING" },
+    data: { status: "GRADING" },
   });
 }
 
@@ -34,5 +41,6 @@ module.exports = {
   countByStudentAndProblem,
   create,
   findByIdWithProblem,
+  claimForGrading,
   findAllForAnalytics,
 };

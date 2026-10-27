@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, CheckCircle2, FileText, Plus, Save, Settings2, Trash2 } from 'lucide-react';
+import { BookOpen, CheckCircle2, FileText, FileJson, Plus, Save, Settings2, Trash2 } from 'lucide-react';
 import { problemAPI } from '../../api/services';
 
 const generatedCases = {
@@ -38,6 +38,7 @@ export default function ProblemForm() {
   const [memoryLimit, setMemoryLimit] = useState(64);
   const [complexity, setComplexity] = useState('O(1)');
   const [testCases, setTestCases] = useState([emptyCase()]);
+  const [importedRules, setImportedRules] = useState(null);
 
   const selectedProblem = useMemo(() => allProblems.find((problem) => problem.id === selectedId), [allProblems, selectedId]);
 
@@ -61,6 +62,7 @@ export default function ProblemForm() {
     setMemoryLimit(64);
     setComplexity('O(1)');
     setTestCases([emptyCase()]);
+    setImportedRules(null);
     setMessage(null);
   };
 
@@ -75,6 +77,7 @@ export default function ProblemForm() {
 
     const problem = allProblems.find((item) => item.id === id);
     const rules = parseRules(problem?.rules);
+    setImportedRules(rules);
     const metrics = Array.isArray(rules.metrics) ? rules.metrics : [];
     const logical = metrics.find((metric) => metric.name === 'logical');
     const complexityRule = metrics.find((metric) => metric.name === 'complexity');
@@ -93,6 +96,43 @@ export default function ProblemForm() {
     setTestCases((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
   };
 
+  const handleRulesImport = (event) => {
+    const [file] = event.target.files;
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      setMessage({ type: 'error', text: 'Please choose a JSON rules file.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = parseRules(String(reader.result || ''));
+        if (!Array.isArray(imported.metrics) || imported.metrics.length === 0) {
+          throw new Error('The JSON file must contain a non-empty metrics array.');
+        }
+        const totalWeight = imported.metrics.reduce((sum, metric) => sum + Number(metric.weight || 0), 0);
+        if (Math.abs(totalWeight - 1) > 0.000001) {
+          throw new Error(`Metric weights must sum to 1.0; received ${totalWeight.toFixed(3)}.`);
+        }
+        setTimeLimit(imported.time_limit_s || timeLimit);
+        setMemoryLimit(imported.memory_limit_mb || memoryLimit);
+        setImportedRules(imported);
+        const complexityRule = imported.metrics.find((metric) => ['complexity', 'complexity_estimator'].includes(metric.name || metric.analyzer));
+        setComplexity(complexityRule?.params?.required || complexity);
+        const logicalRule = imported.metrics.find((metric) => ['logical', 'edge_case_runner', 'io_tests'].includes(metric.name || metric.analyzer));
+        if (Array.isArray(logicalRule?.params?.cases) && logicalRule.params.cases.length) {
+          setTestCases(logicalRule.params.cases.map(normalizeCase));
+        }
+        setMessage({ type: 'success', text: `Imported ${imported.metrics.length} rubric metrics from ${file.name}. Review and save the assignment.` });
+      } catch (error) {
+        setMessage({ type: 'error', text: error.message || 'Unable to parse the rules JSON file.' });
+      }
+    };
+    reader.onerror = () => setMessage({ type: 'error', text: 'Unable to read the selected JSON file.' });
+    reader.readAsText(file);
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -103,11 +143,23 @@ export default function ProblemForm() {
       timeLimitSec: Number(timeLimit),
       memoryLimitMb: Number(memoryLimit),
       rules: {
-        metrics: [
-          { name: 'logical', weight: 0.4, params: { cases: testCases } },
-          { name: 'readability', weight: 0.2, params: { model: 'llama3.1:8b', temperature: 0 } },
-          { name: 'complexity', weight: 0.4, params: { required: complexity } },
-        ],
+        schema_version: '1.0',
+        problem: title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+        time_limit_s: Number(timeLimit),
+        memory_limit_mb: Number(memoryLimit),
+        metrics: (importedRules?.metrics || [
+          { name: 'logical', analyzer: 'logical', weight: 0.4, params: { cases: testCases } },
+          { name: 'readability', analyzer: 'readability', weight: 0.2, params: { model: 'llama3.1:8b', temperature: 0 } },
+          { name: 'complexity', analyzer: 'complexity', weight: 0.4, params: { required: complexity } },
+        ]).map((metric) => {
+          if (['logical', 'edge_case_runner', 'io_tests'].includes(metric.name || metric.analyzer)) {
+            return { ...metric, params: { ...metric.params, cases: testCases } };
+          }
+          if (['complexity', 'complexity_estimator'].includes(metric.name || metric.analyzer)) {
+            return { ...metric, params: { ...metric.params, required: complexity } };
+          }
+          return metric;
+        }),
       },
     };
 
@@ -141,6 +193,11 @@ export default function ProblemForm() {
           {allProblems.map((problem) => <option key={problem.id} value={problem.id}>Edit: {problem.title}</option>)}
         </select>
         {selectedProblem && <p className="mt-2 text-xs text-slate-500">Editing the saved version of <strong className="text-slate-300">{selectedProblem.title}</strong>. Test-case values are loaded from its logical rubric.</p>}
+        <label className="mt-4 flex w-fit cursor-pointer items-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20">
+          <FileJson size={16} /> Import rules JSON
+          <input type="file" accept=".json,application/json" className="hidden" onChange={handleRulesImport} disabled={saving} />
+        </label>
+        <p className="mt-2 text-xs text-slate-500">Imports limits, metrics, weights, and configured public cases into this form. Saving stores them in the database.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">

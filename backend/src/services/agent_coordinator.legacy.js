@@ -2,10 +2,20 @@ require("dotenv").config();
 const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
-const fs = require("fs");
-const path = require("path");
-const { exec, spawn } = require("child_process");
-const { performance } = require("perf_hooks");
+const {
+  createReport,
+} = require("../contracts");
+const { loadDatabaseRules } = require("../rules/rule-loader");
+const { executeConfiguredRules } = require("../rules/rule-engine.service");
+const sandbox = require("../sandbox/wsl-executor");
+const {
+  runStructureAnalyzer,
+  runModularityAnalyzer,
+  runComplexityAnalyzer,
+} = require("../analyzers/source.analyzers");
+const { runOriginalityAnalyzer } = require("../analyzers/originality.analyzer");
+const { runMemorySafetyAnalyzer } = require("../analyzers/memory-safety.analyzer");
+const { buildReportMetadata } = require("../reporting/report-metadata");
 
 // Database Initialization (Prisma 7 format)
 const connectionString = process.env.DATABASE_URL;
@@ -13,70 +23,15 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-const submissionsDir = path.join(__dirname, "../submissions");
-const exePath = path.join(submissionsDir, "test.exe");
-
-// Ensure submissions directory exists
-if (!fs.existsSync(submissionsDir)) {
-  fs.mkdirSync(submissionsDir, { recursive: true });
-}
-
 // ---------------------------------------------------------
 // AGENT 1: The First Pass (Compiler & Setup with Fallback)
 // ---------------------------------------------------------
-async function runFirstPass(code, timeLimitSec) {
-  const codePath = path.join(submissionsDir, "test.c");
-  const errorPath = path.join(submissionsDir, "error.log");
-  fs.writeFileSync(codePath, code);
-
-  return new Promise((resolve) => {
-    // Attempt 1: Try compiling with AddressSanitizer (Memory Leak Detection)
-    exec(
-      `gcc -O2 -Wall -Wextra -std=c11 -fsanitize=address -g "${codePath}" -o "${exePath}" 2> "${errorPath}"`,
-      (error, stdout, stderr) => {
-        if (error) {
-          const gccError = fs.readFileSync(errorPath, "utf-8");
-
-          // Check if it failed specifically because MinGW is missing the ASAN library
-          if (gccError.includes("lasan") || gccError.includes("sanitize")) {
-            console.log(
-              "⚠️ MinGW ASAN not found. Falling back to standard compilation...",
-            );
-
-            // Attempt 2: Fallback to standard compilation without ASAN
-            exec(
-              `gcc -O2 -Wall -Wextra -std=c11 -g "${codePath}" -o "${exePath}" 2> "${errorPath}"`,
-              (fallbackError, fallbackStdout, fallbackStderr) => {
-                if (fallbackError) {
-                  const fallbackGccError = fs.readFileSync(errorPath, "utf-8");
-                  console.log(
-                    `\n❌ GCC Compilation Error:\n${fallbackGccError}`,
-                  );
-                  resolve({
-                    success: false,
-                    reason: "Compilation Failed",
-                    output: fallbackGccError,
-                  });
-                } else {
-                  resolve({ success: true, warnings: fallbackStderr });
-                }
-              },
-            );
-          } else {
-            // It's a genuine syntax error made by the student
-            console.log(`\n❌ GCC Compilation Error:\n${gccError}`);
-            resolve({
-              success: false,
-              reason: "Compilation Failed",
-              output: gccError,
-            });
-          }
-        } else {
-          resolve({ success: true, warnings: stderr });
-        }
-      },
-    );
-  });
+async function runFirstPass(code, timeLimitSec, workspace) {
+  const compileResult = await sandbox.compile(workspace, timeLimitSec);
+  return {
+    ...compileResult,
+    executablePath: workspace,
+  };
 }
 
 // ---------------------------------------------------------
@@ -101,7 +56,7 @@ function generateEdgeCase(caseType) {
   }
 }
 
-async function runLogicalAgent(casesToTest) {
+async function runLogicalAgent(casesToTest, workspace, limits) {
   if (!casesToTest || !Array.isArray(casesToTest) || casesToTest.length === 0) {
     console.log("  ❌ Logical Agent Failed: No valid test cases provided.");
     return { score: 0, details: [] };
@@ -129,37 +84,21 @@ async function runLogicalAgent(casesToTest) {
   for (const testCase of normalizedCases) {
     if (!testCase.input || !testCase.expected) continue;
 
-    const result = await new Promise((resolve) => {
-      const child = spawn(exePath);
-      let output = "";
-      let isTimeout = false;
-
-      const timer = setTimeout(() => {
-        isTimeout = true;
-        child.kill("SIGKILL");
-        resolve({ passed: false, reason: "Timeout" });
-      }, 1000);
-
-      child.stdout.on("data", (data) => (output += data.toString()));
-
-      child.on("close", () => {
-        clearTimeout(timer);
-        if (isTimeout) return;
-        const actualOutput = output.trim();
-        resolve({
-          passed: actualOutput === testCase.expected.trim(),
-          got: actualOutput,
-        });
-      });
-      child.stdin.write(testCase.input + "\n");
-      child.stdin.end();
-    });
+    const execution = await sandbox.run(workspace, `${testCase.input}\n`, limits);
+    const actualOutput = execution.output.trim();
+    const result = {
+      passed: execution.passed && actualOutput === testCase.expected.trim(),
+      got: actualOutput || (execution.timedOut ? "Timeout" : execution.error || "No output"),
+    };
 
     if (result.passed) score++;
     details.push({
       case: testCase.case,
+      input: testCase.input,
+      expected: testCase.expected,
       passed: result.passed,
       got: result.got || "Timeout",
+      actual: result.got || "Timeout",
     });
     console.log(
       `  ${result.passed ? "✅" : "❌"} ${testCase.case}: ${result.passed ? "Passed" : `Got ${result.got}`}`,
@@ -475,7 +414,9 @@ async function gradeSubmission(submissionId) {
     `\n🚀 Starting Agentic AutoGrader for Submission: ${submissionId}`,
   );
 
+  let workspace;
   try {
+    await sandbox.ensureAvailable();
     // 1. Fetch Submission & Problem Rules from Database
     const submission = await prisma.submission.findUnique({
       where: { id: submissionId },
@@ -484,20 +425,34 @@ async function gradeSubmission(submissionId) {
 
     if (!submission) throw new Error("Submission not found!");
 
-    // Mark as grading
-    await prisma.submission.update({
-      where: { id: submissionId },
+    const claim = await prisma.submission.updateMany({
+      where: { id: submissionId, status: "PENDING" },
       data: { status: "GRADING" },
     });
+    if (claim.count !== 1) {
+      console.log(`Skipping submission ${submissionId}; it is already being graded or completed.`);
+      return;
+    }
 
     console.log(`📋 Loaded Rules for: ${submission.problem.title}`);
-    const rules = submission.problem.rules; // The JSONB rules!
+    const rules = loadDatabaseRules(submission.problem);
+    const reportMetadata = buildReportMetadata({
+      code: submission.code,
+      rules,
+    });
 
-    // 2. Run First Pass (Compile)
-    const firstPass = await runFirstPass(
-      submission.code,
-      submission.problem.timeLimitSec,
-    );
+    workspace = await sandbox.createWorkspace(submission.id, submission.code);
+    let firstPass;
+    try {
+      // 2. Run First Pass (Compile)
+      firstPass = await runFirstPass(
+        submission.code,
+        submission.problem.timeLimitSec,
+        workspace,
+      );
+    } finally {
+      if (!firstPass?.success) sandbox.cleanup(workspace);
+    }
 
     if (!firstPass.success) {
       console.log("❌ Compilation Failed. Consulting AI for syntax hints...");
@@ -511,11 +466,17 @@ async function gradeSubmission(submissionId) {
         rawCompilerError,
       );
 
-      const report = {
+      const report = createReport({
+        submissionId,
+        ...reportMetadata,
+        firstPass,
+        finalScore: 0,
         metrics: [
           {
             name: "compilation_error",
+            status: "BLOCKED",
             weight: 1.0,
+            score: 0,
             contribution: 0,
             details: {
               rawError: rawCompilerError,
@@ -524,7 +485,9 @@ async function gradeSubmission(submissionId) {
             },
           },
         ],
-      };
+        flags: ["compilation_failed"],
+        limitations: ["Execution-dependent analyzers were blocked by compilation failure."],
+      });
 
       await prisma.submission.update({
         where: { id: submissionId },
@@ -535,103 +498,54 @@ async function gradeSubmission(submissionId) {
         },
       });
 
+      sandbox.cleanup(workspace);
       console.log("✅ AutoGrader Complete with Structured AI Syntax Help!");
       return;
     }
 
-    // 3. Dispatch Experts Based on DB Rules
-    let totalScore = 0;
-    const reportMetrics = [];
-
-    // 🔥 3a. Run AI Detector FIRST (To set the context)
-    const aiDetectionResult = await runAIDetectorAgent(submission.code);
-    reportMetrics.push({
-      name: "ai_detection",
-      score: aiDetectionResult.is_ai ? 0 : 1,
-      contribution: 0,
-      details: {
-        is_ai: aiDetectionResult.is_ai,
-        confidence: aiDetectionResult.confidence,
-        reason: aiDetectionResult.reason,
-      },
-    });
-
-    // 3b. Readability LLM Agent (🔥 Passes the is_ai flag)
-    const readabilityRule = rules.metrics.find((m) => m.name === "readability");
-    if (readabilityRule) {
-      const llmResult = await runLLMReview(
-        submission.code,
-        readabilityRule.params,
-        aiDetectionResult.is_ai, // Passing the context!
-      );
-      const contribution = llmResult.score * readabilityRule.weight * 100;
-      totalScore += contribution;
-
-      reportMetrics.push({
-        name: "readability",
-        score: llmResult.score,
-        contribution,
-        details: { feedback: llmResult.feedback },
-      });
-    }
-
-    // 3c. Logical Edge Case Agent
-    const logicalRule = rules.metrics.find((m) => m.name === "logical");
-    if (logicalRule) {
-      const logicalResult = await runLogicalAgent(logicalRule.params.cases);
-      const contribution = logicalResult.score * logicalRule.weight * 100;
-      totalScore += contribution;
-
-      let aiLogicalFeedback = null;
-      if (logicalResult.score < 1) {
-        const failedCases = logicalResult.details.filter((d) => !d.passed);
-        aiLogicalFeedback = await analyzeLogicalFailure(
-          submission.code,
-          failedCases,
-        );
-      }
-
-      reportMetrics.push({
-        name: "logical",
-        score: logicalResult.score,
-        contribution,
-        details: logicalResult.details,
-        aiFeedback: aiLogicalFeedback,
-      });
-    }
-
-    // 3d. Complexity Agent
-    const complexityRule = rules.metrics.find((m) => m.name === "complexity");
-    if (complexityRule) {
-      const compResult = await runComplexityAgent(
-        submission.code,
-        complexityRule.params.required,
-      );
-      const contribution = compResult.score * complexityRule.weight * 100;
-      totalScore += contribution;
-
-      reportMetrics.push({
-        name: "complexity",
-        score: compResult.score,
-        contribution,
-        details: {
-          estimated: compResult.estimated,
-          feedback: compResult.feedback,
-          runs: compResult.details,
-        },
-      });
-    }
-
-    // 🔥 PEER-TO-PEER PLAGIARISM CHECK 🔥
-    console.log(`\n🕵️‍♂️ Checking for Peer Plagiarism...`);
+    // 3. Execute exactly the metrics configured in the database rules.
     const otherSubmissions = await prisma.submission.findMany({
       where: {
         problemId: submission.problemId,
-        studentId: { not: submission.studentId }, // Doosre students ka code
+        studentId: { not: submission.studentId },
         status: "COMPLETED",
       },
+      select: { id: true, code: true },
     });
 
+    const execution = await executeConfiguredRules(rules, {
+      firstPass,
+      runLogical: (cases) => runLogicalAgent(cases, workspace, {
+        timeLimitSec: rules.time_limit_s,
+        memoryLimitMb: rules.memory_limit_mb,
+      }),
+      explainLogicalFailure: (failedCases) =>
+        analyzeLogicalFailure(submission.code, failedCases),
+      runReadability: (params) =>
+        runLLMReview(submission.code, params, false),
+      runComplexity: (required) =>
+        Promise.resolve(runComplexityAnalyzer(submission.code, required)),
+      runStructure: () => runStructureAnalyzer(submission.code),
+      runModularity: (params) => runModularityAnalyzer(submission.code, params),
+      runMemorySafety: (params) => runMemorySafetyAnalyzer(
+        submission.code,
+        sandbox,
+        workspace,
+        {
+          timeLimitSec: rules.time_limit_s,
+          memoryLimitMb: rules.memory_limit_mb,
+          ...params,
+        },
+      ),
+      runOriginality: async (params) =>
+        runOriginalityAnalyzer(submission.code, otherSubmissions, params.threshold),
+      runAiDetection: () => runAIDetectorAgent(submission.code),
+    });
+    const totalScore = execution.finalScore;
+    const reportMetrics = execution.metrics;
+
+    // 🔥 PEER-TO-PEER PLAGIARISM CHECK 🔥
+    console.log(`\n🕵️‍♂️ Checking for Peer Plagiarism...`);
     let isPlagiarized = false;
     let plagiarismScore = 0;
     let matchedWithId = null;
@@ -664,13 +578,45 @@ async function gradeSubmission(submissionId) {
         isPlagiarized: isPlagiarized, // 🔥 DB me flag update hoga
         plagiarismScore: plagiarismScore,
         matchedWithId: matchedWithId,
-        report: { firstPass, metrics: reportMetrics },
+        report: createReport({
+          submissionId,
+          ...reportMetadata,
+          firstPass,
+          metrics: reportMetrics,
+          finalScore: totalScore,
+          flags: isPlagiarized ? ["similarity_match"] : [],
+          usefulness: [
+            "Provides deterministic test evidence and weighted metric contributions.",
+            "Provides actionable feedback for failed cases and configured code-quality metrics.",
+          ],
+          limitations: [
+            "Originality and AI-style signals are review indicators, not proof of misconduct.",
+            "Static complexity and structure analysis are heuristic and depend on configured rules.",
+          ],
+        }),
       },
     });
 
+    sandbox.cleanup(workspace);
     console.log("✅ AutoGrader Complete!");
   } catch (error) {
     console.error("Error during grading:", error);
+    if (workspace) sandbox.cleanup(workspace);
+    try {
+      await prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: "FAILED",
+          report: createReport({
+            submissionId,
+            flags: ["grading_failed"],
+            limitations: [error.message],
+          }),
+        },
+      });
+    } catch (persistenceError) {
+      console.error("Failed to persist grading failure:", persistenceError);
+    }
   }
 }
 

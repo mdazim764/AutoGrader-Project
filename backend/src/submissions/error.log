@@ -1,0 +1,7 @@
+E:\AutoGrader-Project\backend\src\submissions\test.c: In function 'main':
+E:\AutoGrader-Project\backend\src\submissions\test.c:8:5: error: expected ';' before 'if'
+     if (n == 0) {
+     ^~
+E:\AutoGrader-Project\backend\src\submissions\test.c:5:15: warning: unused variable 'fact' [-Wunused-variable]
+     long long fact = 1;
+               ^~~~

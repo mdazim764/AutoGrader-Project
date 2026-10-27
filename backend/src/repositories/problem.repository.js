@@ -17,8 +17,19 @@ function create(data) {
   return prisma.problem.create({ data });
 }
 
+function findById(id) {
+  return prisma.problem.findUnique({ where: { id } });
+}
+
 function update(id, data) {
   return prisma.problem.update({ where: { id }, data });
 }
 
-module.exports = { findAllPublic, create, update };
+function updateOwned(id, instructorId, data) {
+  return prisma.problem.updateMany({
+    where: { id, instructorId },
+    data,
+  });
+}
+
+module.exports = { findAllPublic, findById, create, update, updateOwned };

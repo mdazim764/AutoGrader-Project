@@ -15,8 +15,18 @@ async function createSubmission(problemId, code, studentId) {
   });
 }
 
-function getSubmission(id) {
-  return submissionRepository.findByIdWithProblem(id);
+async function getSubmission(id, user) {
+  const submission = await submissionRepository.findByIdWithProblem(id);
+  if (!submission) return null;
+  const allowed = user.role === "INSTRUCTOR"
+    ? submission.problem.instructorId === user.id
+    : submission.studentId === user.id;
+  if (!allowed) {
+    const error = new Error("You do not have access to this submission.");
+    error.statusCode = 403;
+    throw error;
+  }
+  return submission;
 }
 
 function listSubmissions() {

@@ -27,4 +27,11 @@ const isInstructor = (req, res, next) => {
   next();
 };
 
-module.exports = { authenticate, isInstructor };
+const isStudent = (req, res, next) => {
+  if (req.user.role !== "STUDENT") {
+    return res.status(403).json({ error: "Access denied. Students only." });
+  }
+  next();
+};
+
+module.exports = { authenticate, isInstructor, isStudent };

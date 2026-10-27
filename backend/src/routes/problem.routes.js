@@ -9,6 +9,6 @@ const {
 
 router.get("/", listProblems);
 router.post("/", authenticate, isInstructor, createProblem);
-router.put("/:id", updateProblem);
+router.put("/:id", authenticate, isInstructor, updateProblem);
 
 module.exports = router;

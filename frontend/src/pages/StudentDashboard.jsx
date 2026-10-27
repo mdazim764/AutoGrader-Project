@@ -117,6 +117,21 @@ export default function StudentDashboard() {
     setError(null);
   };
 
+  const handleCodeFileLoad = (file) => {
+    if (!file.name.toLowerCase().endsWith('.c')) {
+      setError('Please choose a C source file with a .c extension.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCode(String(reader.result || ''));
+      setResult(null);
+      setError(null);
+    };
+    reader.onerror = () => setError('Unable to read the selected C source file.');
+    reader.readAsText(file);
+  };
+
   const handleSubmit = async () => {
     if (!problem || !code.trim()) return;
     setGrading(true);
@@ -216,7 +231,7 @@ export default function StudentDashboard() {
             </section>
             </aside>
             <section className="min-w-0">
-              <CodeEditor code={code} setCode={setCode} />
+              <CodeEditor code={code} setCode={setCode} onFileLoad={handleCodeFileLoad} />
             </section>
           </div>
 

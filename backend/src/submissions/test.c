@@ -3,7 +3,7 @@
 int main() {
     int n = 0;
     long long fact = 1; 
-    scanf("%d", &n);
+    scanf("%d", &n)
     
     if (n == 0) {
         printf("1\n");
