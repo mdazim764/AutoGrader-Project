@@ -47,12 +47,26 @@ function runWsl(script, timeoutMs) {
 }
 
 async function ensureAvailable() {
-  const result = await runWsl("command -v bash >/dev/null && command -v gcc >/dev/null && command -v timeout >/dev/null", 5000);
-  if (result.timedOut || result.code !== 0) {
-    throw new Error(
-      "WSL2 with bash, gcc, and coreutils timeout is required for safe grading. Install WSL2, a Linux distribution, bash, gcc, and coreutils before grading submissions.",
-    );
+  const check = "command -v bash >/dev/null && command -v gcc >/dev/null && command -v timeout >/dev/null";
+  let lastResult;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    lastResult = await runWsl(check, 15000);
+    if (!lastResult.timedOut && lastResult.code === 0) return;
   }
+
+  const detail = lastResult?.timedOut
+    ? "The WSL command timed out while starting."
+    : lastResult?.stderr?.trim() || `Prerequisite check exited with code ${lastResult?.code ?? "unknown"}.`;
+  throw new Error(
+    `WSL2 with bash, gcc, and coreutils timeout is required for safe grading. ${detail} Install WSL2, a Linux distribution, bash, gcc, and coreutils before grading submissions.`,
+  );
+}
+
+function compilationReason(result, stderr) {
+  if (result.timedOut) return "Compilation timeout";
+  if (result.code !== 0) return "Compilation failed";
+  return stderr ? "Compilation succeeded with warnings" : "Compilation succeeded";
 }
 
 async function createWorkspace(submissionId, code) {
@@ -80,7 +94,7 @@ async function compile(workspace, timeLimitSec) {
     success: !result.timedOut && result.code === 0,
     warnings: stderr,
     output: stderr,
-    reason: result.timedOut ? "Compilation timeout" : "Compilation failed",
+    reason: compilationReason(result, stderr),
     executablePath: path.join(workspace, "submission"),
   };
 }

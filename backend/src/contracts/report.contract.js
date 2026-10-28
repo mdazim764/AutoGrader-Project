@@ -35,6 +35,7 @@ function createReport({
   metrics = [],
   finalScore = null,
   flags = [],
+  integrity = null,
   usefulness = [],
   limitations = [],
   generatedBy = "backend-grading-worker",
@@ -56,6 +57,7 @@ function createReport({
     metrics: metrics.map(normalizeReportMetric),
     overall_score: finalScore,
     flags,
+    ...(integrity ? { integrity } : {}),
     generated_by: generatedBy,
     usefulness_limitations: {
       usefulness,
