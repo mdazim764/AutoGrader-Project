@@ -78,30 +78,122 @@ sequenceDiagram
 
 ## Prerequisites
 
-Install the following before running the application:
+Complete the following setup before starting either application. The supported development host is
+Windows 10/11 with WSL2. Run Windows commands in PowerShell and Linux commands inside the WSL
+distribution.
 
-1. Node.js 22 or newer.
-2. PostgreSQL 14 or newer.
-3. Windows Subsystem for Linux 2.
-4. A WSL Linux distribution with:
-   - `bash`
-   - `gcc`
-   - GNU `timeout` from `coreutils`
-5. Ollama is optional. It is required only for LLM-assisted reviews; deterministic grading continues if it is unavailable.
+### 1. Install Git and Node.js
 
-Verify WSL:
+Install Git for Windows and Node.js 22 LTS or newer. Confirm that both commands are available:
+
+```powershell
+git --version
+node --version
+npm --version
+```
+
+Node.js is used by both the Express backend and the Vite frontend. Use the same Node installation
+for `npm ci`, Prisma commands, tests, and development servers.
+
+### 2. Install and initialize PostgreSQL
+
+Install PostgreSQL 14 or newer and make sure the PostgreSQL service is running. During installation,
+record the database username and password. Create an application database using `psql`, pgAdmin, or
+the PostgreSQL SQL shell:
+
+```sql
+CREATE USER autograder_user WITH PASSWORD 'replace-with-a-local-password';
+CREATE DATABASE autograder OWNER autograder_user;
+```
+
+Verify the connection from PowerShell:
+
+```powershell
+psql --version
+psql "postgresql://autograder_user:replace-with-a-local-password@localhost:5432/autograder" -c "SELECT version();"
+```
+
+If `psql` is not on `PATH`, run it from the PostgreSQL `bin` directory or add that directory to
+the Windows `PATH`. The application does not require a separate Redis server.
+
+### 3. Install and prepare WSL2
+
+Install WSL2 and a supported Linux distribution from an elevated PowerShell window:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Restart Windows if requested, then open Ubuntu once and create the Linux username and password.
+Confirm that the default WSL version is 2:
 
 ```powershell
 wsl --status
+wsl -l -v
+wsl --set-default-version 2
+```
+
+Inside Ubuntu, install the compiler and runtime utilities:
+
+```bash
+sudo apt update
+sudo apt install -y bash build-essential gcc coreutils
+gcc --version
+timeout --version
+```
+
+The grader compiles with GCC and C11, then runs each submission inside a temporary WSL workspace.
+Do not install or run student programs directly from the Windows host shell.
+
+Verify the exact commands used by the backend:
+
+```powershell
 wsl -e bash -lc "command -v bash && command -v gcc && command -v timeout"
 ```
 
-Verify Ollama if enabled:
+If WSL is installed but the command fails, restart WSL and retry:
 
 ```powershell
-Invoke-WebRequest http://localhost:11434/api/tags
-ollama list
+wsl --shutdown
+wsl -d Ubuntu -e bash -lc "gcc --version && timeout --version"
 ```
+
+### 4. Optional: install Ollama for AI reviews
+
+Ollama is optional. Logical grading, compilation, scoring, and deterministic analyzers continue to
+work without it. Install Ollama for local readability, complexity, logical-feedback, and AI-style
+review assistance, then download a model:
+
+```powershell
+ollama pull llama3.1:8b
+ollama list
+Invoke-WebRequest http://localhost:11434/api/tags
+```
+
+The Ollama service normally listens on `http://localhost:11434`. Keep it running while grading:
+
+```powershell
+ollama serve
+```
+
+If another model is installed, set `OLLAMA_MODEL` to that exact tag. Ollama review output is advisory
+and never replaces deterministic test evidence or changes marks.
+
+### 5. Verify all prerequisites
+
+Run this checklist before installing npm dependencies:
+
+```powershell
+git --version
+node --version
+npm --version
+psql --version
+wsl --status
+wsl -e bash -lc "command -v bash && command -v gcc && command -v timeout"
+Invoke-WebRequest http://localhost:11434/api/tags -UseBasicParsing
+```
+
+The last command is optional and may fail when Ollama is intentionally disabled.
 
 ## Installation
 
@@ -251,5 +343,3 @@ docs/
 - LLM reviews depend on local model availability and are not deterministic grading evidence.
 - Originality analysis is a review signal; it is not legal or definitive proof of misconduct.
 - Complexity and source-structure analysis are heuristic unless the instructor defines executable criteria.
-
-See [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) for the complete architecture, workflow, scoring, testing evidence, and assignment mapping.
