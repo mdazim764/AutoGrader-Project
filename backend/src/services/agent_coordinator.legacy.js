@@ -608,7 +608,11 @@ async function gradeSubmission(submissionId) {
         },
       ),
       runOriginality: async (params) =>
-        runOriginalityAnalyzer(submission.code, otherSubmissions, params.threshold),
+        runOriginalityAnalyzer(
+          submission.code,
+          otherSubmissions,
+          params.threshold ?? rules.integrity.similarity_review_threshold,
+        ),
       runAiDetection: () => runAIDetectorAgent(submission.code),
     });
     const metricScore = execution.finalScore;
@@ -636,7 +640,7 @@ async function gradeSubmission(submissionId) {
       const originality = await runOriginalityAnalyzer(
         submission.code,
         otherSubmissions,
-        0.85,
+        rules.integrity.similarity_review_threshold,
       );
       reportMetrics.push({
         name: "originality",
@@ -674,14 +678,19 @@ async function gradeSubmission(submissionId) {
         break; // Ek baar pakda gaya toh check rok do
       }
     }
-    const integrityPenalty = isPlagiarized ? 100 : 0;
-    const totalScore = isPlagiarized ? 0 : metricScore;
+    const exactMatchAction = rules.integrity.exact_peer_match_action;
+    const integrityPenalty = isPlagiarized && exactMatchAction !== "REVIEW_ONLY" ? 100 : 0;
+    const totalScore = integrityPenalty > 0 ? 0 : metricScore;
     const integrityDecision = isPlagiarized
-      ? "EXACT_PEER_MATCH_SCORE_ZERO"
+      ? `EXACT_PEER_MATCH_${exactMatchAction}`
       : "NO_EXACT_PEER_MATCH";
     const reportFlags = [
       ...(reviewSignals.flags || []),
-      ...(isPlagiarized ? ["similarity_match"] : []),
+      ...(isPlagiarized && exactMatchAction !== "REVIEW_ONLY" ? ["similarity_match"] : []),
+      ...(isPlagiarized && exactMatchAction === "REVIEW_ONLY" ? ["exact_match_review"] : []),
+      ...(isPlagiarized && exactMatchAction === "BLOCK_SUBMISSION"
+        ? ["integrity_blocked"]
+        : []),
     ];
 
     // 4. Save Final Report to Database
@@ -720,11 +729,13 @@ async function gradeSubmission(submissionId) {
               ? "AI-style review produced a signal for instructor follow-up; marks affected: 0."
               : "AI-style review ran and found no strong signal in the submitted source; marks affected: 0.",
             isPlagiarized
-              ? "Peer-code similarity review found an exact normalized peer-code match; the integrity policy set the final score to 0."
+              ? exactMatchAction === "REVIEW_ONLY"
+                ? "Peer-code similarity review found an exact normalized peer-code match; the configured policy requires instructor review and deducted 0 marks."
+                : "Peer-code similarity review found an exact normalized peer-code match; the configured integrity policy set the final score to 0."
               : reviewSignals.similarityDetected
                 ? "Peer-code similarity review produced a non-exact signal using the available submission corpus; marks affected: 0."
                 : "Peer-code similarity review found no high-similarity match in the available corpus; marks affected: 0.",
-            ...(isPlagiarized
+            ...(isPlagiarized && exactMatchAction !== "REVIEW_ONLY"
               ? ["An exact normalized peer-code match was found; the assignment integrity policy set the final score to 0."]
               : []),
           ],

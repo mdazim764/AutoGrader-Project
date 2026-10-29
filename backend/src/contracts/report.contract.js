@@ -2,7 +2,7 @@ const {
   normalizeAnalyzerResult,
 } = require("./analyzer-result.contract");
 
-const REPORT_SCHEMA_VERSION = "1.0";
+const REPORT_SCHEMA_VERSION = "1.1";
 
 function normalizeReportMetric(metric) {
   const normalized = normalizeAnalyzerResult(

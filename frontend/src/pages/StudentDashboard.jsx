@@ -51,8 +51,11 @@ function getRules(problem) {
 }
 
 function getTestCases(problem) {
-  const logical = getRules(problem)?.metrics?.find((metric) => metric.name === 'logical');
-  const cases = logical?.params?.cases;
+  const rules = getRules(problem);
+  const logical = rules?.metrics?.find((metric) => ['logical', 'edge_case_runner', 'io_tests'].includes(metric.name || metric.analyzer));
+  const cases = Array.isArray(rules?.tests?.public) && rules.tests.public.length
+    ? rules.tests.public
+    : logical?.params?.cases;
   if (!Array.isArray(cases)) return [];
 
   return cases.map((testCase, index) => {
@@ -63,7 +66,12 @@ function getTestCases(problem) {
         id: `${testCase}-${index}`,
       };
     }
-    return { ...testCase, id: `${testCase.case || 'case'}-${index}` };
+    const generated = generatedCases[testCase.case] || {};
+    return {
+      ...generated,
+      ...testCase,
+      id: `${testCase.case || testCase.id || 'case'}-${index}`,
+    };
   });
 }
 

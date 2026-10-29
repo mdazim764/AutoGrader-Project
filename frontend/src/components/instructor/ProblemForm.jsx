@@ -23,7 +23,16 @@ function parseRules(value) {
 }
 
 function normalizeCase(value) {
-  if (typeof value !== 'string') return { ...value, case: value.case || 'custom', input: value.input ?? '', expected: value.expected ?? '' };
+  if (typeof value !== 'string') {
+    const generated = generatedCases[value.case] || {};
+    return {
+      ...generated,
+      ...value,
+      case: value.case || 'custom',
+      input: value.input ?? generated.input ?? '',
+      expected: value.expected ?? generated.expected ?? '',
+    };
+  }
   return { case: value, ...(generatedCases[value] || {}) };
 }
 
@@ -38,6 +47,9 @@ export default function ProblemForm() {
   const [memoryLimit, setMemoryLimit] = useState(64);
   const [complexity, setComplexity] = useState('O(1)');
   const [testCases, setTestCases] = useState([emptyCase()]);
+  const [hiddenCases, setHiddenCases] = useState([]);
+  const [exactMatchAction, setExactMatchAction] = useState('ZERO_SCORE');
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.85);
   const [importedRules, setImportedRules] = useState(null);
 
   const selectedProblem = useMemo(() => allProblems.find((problem) => problem.id === selectedId), [allProblems, selectedId]);
@@ -62,6 +74,9 @@ export default function ProblemForm() {
     setMemoryLimit(64);
     setComplexity('O(1)');
     setTestCases([emptyCase()]);
+    setHiddenCases([]);
+    setExactMatchAction('ZERO_SCORE');
+    setSimilarityThreshold(0.85);
     setImportedRules(null);
     setMessage(null);
   };
@@ -87,9 +102,15 @@ export default function ProblemForm() {
     setTimeLimit(problem?.timeLimitSec || 1);
     setMemoryLimit(problem?.memoryLimitMb || 64);
     setComplexity(complexityRule?.params?.required || 'O(1)');
-    setTestCases(Array.isArray(logical?.params?.cases) && logical.params.cases.length
-      ? logical.params.cases.map(normalizeCase)
+    const publicCases = Array.isArray(rules.tests?.public) && rules.tests.public.length
+      ? rules.tests.public
+      : logical?.params?.cases;
+    setTestCases(Array.isArray(publicCases) && publicCases.length
+      ? publicCases.map(normalizeCase)
       : [emptyCase()]);
+    setHiddenCases(Array.isArray(rules.tests?.hidden) ? rules.tests.hidden.map(normalizeCase) : []);
+    setExactMatchAction(rules.integrity?.exact_peer_match_action || 'ZERO_SCORE');
+    setSimilarityThreshold(rules.integrity?.similarity_review_threshold ?? 0.85);
   };
 
   const handleChangeTestCase = (index, field, value) => {
@@ -118,6 +139,9 @@ export default function ProblemForm() {
         setTimeLimit(imported.time_limit_s || timeLimit);
         setMemoryLimit(imported.memory_limit_mb || memoryLimit);
         setImportedRules(imported);
+        setHiddenCases(Array.isArray(imported.tests?.hidden) ? imported.tests.hidden.map(normalizeCase) : []);
+        setExactMatchAction(imported.integrity?.exact_peer_match_action || 'ZERO_SCORE');
+        setSimilarityThreshold(imported.integrity?.similarity_review_threshold ?? 0.85);
         const complexityRule = imported.metrics.find((metric) => ['complexity', 'complexity_estimator'].includes(metric.name || metric.analyzer));
         setComplexity(complexityRule?.params?.required || complexity);
         const logicalRule = imported.metrics.find((metric) => ['logical', 'edge_case_runner', 'io_tests'].includes(metric.name || metric.analyzer));
@@ -143,10 +167,23 @@ export default function ProblemForm() {
       timeLimitSec: Number(timeLimit),
       memoryLimitMb: Number(memoryLimit),
       rules: {
-        schema_version: '1.0',
+        ...importedRules,
+        schema_version: '1.1',
         problem: title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
         time_limit_s: Number(timeLimit),
         memory_limit_mb: Number(memoryLimit),
+        tests: {
+          ...(importedRules?.tests || {}),
+          public: testCases,
+          hidden: hiddenCases,
+        },
+        integrity: {
+          exact_peer_match_action: exactMatchAction,
+          similarity_review_threshold: Number(similarityThreshold),
+          similarity_action: 'REVIEW_ONLY',
+          ai_action: 'REVIEW_ONLY',
+          ...(importedRules?.integrity || {}),
+        },
         metrics: (importedRules?.metrics || [
           { name: 'logical', analyzer: 'logical', weight: 0.4, params: { cases: testCases } },
           { name: 'readability', analyzer: 'readability', weight: 0.2, params: { model: 'llama3.1:8b', temperature: 0 } },
@@ -206,6 +243,21 @@ export default function ProblemForm() {
           <div className="space-y-4">
             <label className="block text-sm text-slate-300">Title<input required value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400" placeholder="e.g. Add Two Integers Safely" /></label>
             <label className="block text-sm text-slate-300">Statement<textarea required value={statement} onChange={(event) => setStatement(event.target.value)} rows="5" className="mt-2 w-full resize-y rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 leading-6 text-white outline-none focus:border-indigo-400" placeholder="Describe the input, expected output, and constraints." /></label>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-amber-900/40 bg-amber-950/10 p-6 shadow-xl shadow-black/10">
+          <div className="mb-5 flex items-center justify-between gap-3 border-b border-amber-900/40 pb-4">
+            <div><h3 className="font-bold text-amber-200">Hidden tests and integrity policy</h3><p className="text-xs text-amber-100/60">Hidden tests are graded but never shown to students.</p></div>
+            <button type="button" onClick={() => setHiddenCases((current) => [...current, emptyCase()])} className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-500/20"><Plus size={15} className="mr-1 inline" /> Add hidden test</button>
+          </div>
+          <div className="space-y-3">
+            {hiddenCases.map((testCase, index) => <div key={`hidden-${testCase.case}-${index}`} className="rounded-xl border border-amber-900/40 bg-slate-950/70 p-4"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-widest text-amber-200/60">Hidden case {index + 1}</span><button type="button" onClick={() => setHiddenCases((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg p-2 text-rose-400 transition hover:bg-rose-500/10" aria-label={`Remove hidden test case ${index + 1}`}><Trash2 size={16} /></button></div><div className="grid gap-3 md:grid-cols-[0.8fr_1.2fr_1.2fr]"><input required value={testCase.case} onChange={(event) => setHiddenCases((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, case: event.target.value } : item))} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400" placeholder="Name" /><textarea required value={testCase.input} onChange={(event) => setHiddenCases((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, input: event.target.value } : item))} className="min-h-20 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400" placeholder="Input" /><textarea required value={testCase.expected} onChange={(event) => setHiddenCases((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, expected: event.target.value } : item))} className="min-h-20 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400" placeholder="Expected output" /></div></div>)}
+            {hiddenCases.length === 0 && <p className="rounded-xl border border-dashed border-amber-900/50 p-4 text-sm text-amber-100/60">No hidden tests configured yet.</p>}
+          </div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <label className="block text-sm text-slate-300">Exact peer-match action<select value={exactMatchAction} onChange={(event) => setExactMatchAction(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"><option value="ZERO_SCORE">Set final score to 0</option><option value="REVIEW_ONLY">Instructor review only</option><option value="BLOCK_SUBMISSION">Block submission</option></select></label>
+            <label className="block text-sm text-slate-300">Similarity review threshold<input min="0" max="1" step="0.01" type="number" value={similarityThreshold} onChange={(event) => setSimilarityThreshold(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400" /><span className="mt-1 block text-xs text-slate-500">AI-style signals remain review-only and never change marks.</span></label>
           </div>
         </section>
 
