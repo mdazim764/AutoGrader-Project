@@ -11,7 +11,21 @@ function create(data) {
 function findByIdWithProblem(id) {
   return prisma.submission.findUnique({
     where: { id },
-    include: { problem: { select: { title: true, instructorId: true } } },
+    include: {
+      problem: { select: { title: true, instructorId: true } },
+      matchedWith: { select: { id: true, student: { select: { name: true, email: true } } } },
+    },
+  });
+}
+
+function findLatestByStudentAndProblem(studentId, problemId) {
+  return prisma.submission.findFirst({
+    where: { studentId, problemId },
+    include: {
+      problem: { select: { title: true, instructorId: true } },
+      matchedWith: { select: { id: true, student: { select: { name: true, email: true } } } },
+    },
+    orderBy: [{ attemptNumber: "desc" }, { createdAt: "desc" }],
   });
 }
 
@@ -41,6 +55,7 @@ module.exports = {
   countByStudentAndProblem,
   create,
   findByIdWithProblem,
+  findLatestByStudentAndProblem,
   claimForGrading,
   findAllForAnalytics,
 };

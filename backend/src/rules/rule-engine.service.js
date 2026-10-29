@@ -89,7 +89,11 @@ async function executeConfiguredRules(rules, context) {
     } else if (analyzer === "ai_detection") {
       const detection = await context.runAiDetection();
       result = {
-        ...metricResult(1, detection, detection.reason),
+        status: detection.error ? "SKIPPED" : "SUCCEEDED",
+        score: null,
+        evidence: detection,
+        feedback: detection.reason,
+        errors: detection.error ? [detection.error] : [],
         reviewOnly: true,
       };
     } else {

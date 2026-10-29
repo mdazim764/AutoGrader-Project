@@ -29,8 +29,12 @@ async function getSubmission(id, user) {
   return submission;
 }
 
+async function getLatestSubmission(problemId, studentId) {
+  return submissionRepository.findLatestByStudentAndProblem(studentId, problemId);
+}
+
 function listSubmissions() {
   return submissionRepository.findAllForAnalytics();
 }
 
-module.exports = { createSubmission, getSubmission, listSubmissions };
+module.exports = { createSubmission, getSubmission, getLatestSubmission, listSubmissions };

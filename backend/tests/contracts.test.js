@@ -32,6 +32,17 @@ test("normalizes public and hidden tests into logical analyzer cases", () => {
   assert.equal(rules.metrics[0].params.cases.length, 2);
 });
 
+test("normalizes structured test inputs without producing [object Object]", () => {
+  const rules = validateRules(baseRules({
+    tests: {
+      public: [{ id: "palindrome", input: { value: 121 }, expected: ["121"] }],
+      hidden: [],
+    },
+  }));
+  assert.equal(rules.tests.public[0].input, "121");
+  assert.equal(rules.tests.public[0].expected, "121");
+});
+
 test("preserves legacy named cases without inventing malformed public inputs", () => {
   const rules = validateRules({
     schema_version: "1.0",

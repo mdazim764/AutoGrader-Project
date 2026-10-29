@@ -2,9 +2,7 @@ require("dotenv").config();
 const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
-const {
-  createReport,
-} = require("../contracts");
+const { createReport } = require("../contracts");
 const { loadDatabaseRules } = require("../rules/rule-loader");
 const { executeConfiguredRules } = require("../rules/rule-engine.service");
 const sandbox = require("../sandbox/wsl-executor");
@@ -14,8 +12,11 @@ const {
   runComplexityAnalyzer,
 } = require("../analyzers/source.analyzers");
 const { runOriginalityAnalyzer } = require("../analyzers/originality.analyzer");
-const { runMemorySafetyAnalyzer } = require("../analyzers/memory-safety.analyzer");
+const {
+  runMemorySafetyAnalyzer,
+} = require("../analyzers/memory-safety.analyzer");
 const { buildReportMetadata } = require("../reporting/report-metadata");
+const { generateJson, getConfiguration } = require("./agents/ollama.client");
 
 // Database Initialization (Prisma 7 format)
 const connectionString = process.env.DATABASE_URL;
@@ -31,6 +32,40 @@ async function runFirstPass(code, timeLimitSec, workspace) {
   return {
     ...compileResult,
     executablePath: workspace,
+  };
+}
+
+function buildDeterministicAiReview({
+  comments,
+  explanatoryComments,
+  functions,
+  longIdentifiers,
+  error,
+}) {
+  const evidence = [
+    `${comments.length} source comments`,
+    `${explanatoryComments} explanatory comments`,
+    `${functions.length} function definitions`,
+    `${longIdentifiers} long identifiers`,
+  ];
+  return {
+    signal: false,
+    is_ai: false,
+    confidence: 0,
+    reason: "LLM authorship review was unavailable; deterministic source-trait review found no conclusive AI signal.",
+    evidence,
+    source_summary: {
+      comments: comments.length,
+      explanatory_comments: explanatoryComments,
+      functions: functions.length,
+      long_identifiers: longIdentifiers,
+    },
+    method: "deterministic-observable-traits-fallback",
+    analysis_mode: "fallback",
+    llm_available: false,
+    unavailable_reason: error.message,
+    scoring_impact: 0,
+    review_only: true,
   };
 }
 
@@ -54,6 +89,18 @@ function generateEdgeCase(caseType) {
     default:
       return null;
   }
+}
+
+function formatExecutionValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(formatExecutionValue).join(" ");
+  if (typeof value === "object") {
+    if (value.value !== undefined) return formatExecutionValue(value.value);
+    if (value.input !== undefined) return formatExecutionValue(value.input);
+    return Object.values(value).map(formatExecutionValue).join(" ");
+  }
+  return String(value);
 }
 
 async function runLogicalAgent(casesToTest, workspace, limits) {
@@ -82,23 +129,56 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
   const details = [];
 
   for (const testCase of normalizedCases) {
-    if (!testCase.input || !testCase.expected) continue;
+    const input = formatExecutionValue(testCase.input);
+    const expected = formatExecutionValue(testCase.expected);
+    if (!input || !expected) {
+      details.push({
+        case: testCase.case,
+        input,
+        expected,
+        passed: false,
+        got: "Invalid test case",
+        actual: null,
+        failureReason: "INVALID_TEST_CASE",
+      });
+      continue;
+    }
 
-    const execution = await sandbox.run(workspace, `${testCase.input}\n`, limits);
+    const execution = await sandbox.run(workspace, `${input}\n`, limits);
     const actualOutput = execution.output.trim();
+    const failureReason = execution.timedOut
+      ? "TIMEOUT"
+      : execution.crashed
+        ? "RUNTIME_CRASH"
+        : execution.error
+          ? "RUNTIME_ERROR"
+          : actualOutput !== expected.trim()
+            ? "WRONG_OUTPUT"
+            : null;
     const result = {
-      passed: execution.passed && actualOutput === testCase.expected.trim(),
-      got: actualOutput || (execution.timedOut ? "Timeout" : execution.error || "No output"),
+      passed: execution.passed && actualOutput === expected.trim(),
+      got:
+        actualOutput ||
+        (execution.timedOut ? "Timeout" : execution.error || "No output"),
+      actual: actualOutput || null,
+      timedOut: Boolean(execution.timedOut),
+      crashed: Boolean(execution.crashed),
+      runtimeError: execution.error || null,
+      failureReason,
     };
 
     if (result.passed) score++;
     details.push({
       case: testCase.case,
-      input: testCase.input,
-      expected: testCase.expected,
+      input,
+      expected,
       passed: result.passed,
       got: result.got || "Timeout",
-      actual: result.got || "Timeout",
+      actual: result.actual || result.got || "Timeout",
+      timedOut: result.timedOut,
+      crashed: result.crashed,
+      runtimeError: result.runtimeError,
+      failureReason: result.failureReason,
     });
     console.log(
       `  ${result.passed ? "✅" : "❌"} ${testCase.case}: ${result.passed ? "Passed" : `Got ${result.got}`}`,
@@ -120,6 +200,17 @@ async function analyzeLogicalFailure(code, failedCases) {
   );
   const cleanCode = String(code).replace(/\\n/g, "\n").replace(/\\t/g, "\t");
   const casesStr = JSON.stringify(failedCases);
+  const deterministicSummary = failedCases
+    .map((testCase) => {
+      if (testCase.failureReason === "TIMEOUT") {
+        return `${testCase.case}: timed out for input ${JSON.stringify(testCase.input)}; the program did not terminate within the configured limit.`;
+      }
+      if (testCase.failureReason === "RUNTIME_CRASH") {
+        return `${testCase.case}: crashed for input ${JSON.stringify(testCase.input)}.`;
+      }
+      return `${testCase.case}: expected ${JSON.stringify(testCase.expected)} but produced ${JSON.stringify(testCase.actual ?? testCase.got)} for input ${JSON.stringify(testCase.input)}.`;
+    })
+    .join("\n");
 
   const prompt = `You are an expert C programming TA. The student's code failed these logical cases:
   ${casesStr}
@@ -127,13 +218,18 @@ async function analyzeLogicalFailure(code, failedCases) {
   Code:\n${cleanCode}
 
   TASK:
-  1. Explain WHY the code failed (e.g., integer overflow, logic error).
-  2. Provide a conceptual hint.
-  3. Generate a NEW "Counter Test Case" (input and expected output) that proves this failure.
+  1. Explain the exact observable failure using the deterministic evidence below. Do not praise the student or invent facts.
+  2. Identify the most likely code construct responsible (loop condition, initialization, input handling, type, termination, or output).
+  3. Provide a concrete conceptual fix, without writing the full solution.
+  4. Generate a NEW counter test case that proves the same failure.
+
+  Deterministic evidence:
+  ${deterministicSummary}
 
   Return ONLY a strict JSON object: 
   {
-    "explanation": "<Why it failed>",
+    "explanation": "<Exact failure and likely responsible construct>",
+    "root_cause": "<Specific code-level cause or unknown>",
     "hint": "<How to fix it conceptually>",
     "counter_case": {
       "input": "<example input>",
@@ -142,24 +238,32 @@ async function analyzeLogicalFailure(code, failedCases) {
   }`;
 
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0.1 },
-      }),
+    const parsed = await generateJson(prompt, {
+      generationOptions: { temperature: 0.1 },
     });
-    const data = await response.json();
-    return JSON.parse(data.response);
+    return {
+      explanation: parsed.explanation || deterministicSummary,
+      root_cause:
+        parsed.root_cause ||
+        "The exact cause could not be isolated from the available evidence.",
+      hint:
+        parsed.hint ||
+        "Trace the failing input through the loop condition, initialization, and output statement.",
+      counter_case: parsed.counter_case || { input: "N/A", expected: "N/A" },
+    };
   } catch (err) {
     return {
-      explanation: "Logical error detected in edge cases.",
-      hint: "Check variable bounds and data types.",
+      explanation:
+        deterministicSummary ||
+        "The submitted program did not produce the expected result.",
+      root_cause: failedCases.some(
+        (testCase) => testCase.failureReason === "TIMEOUT",
+      )
+        ? "The program did not terminate within the configured time limit for at least one input."
+        : "The output differs from the expected result for at least one input.",
+      hint: "Trace the failing input through the loop condition, initialization, and output statement.",
       counter_case: { input: "N/A", expected: "N/A" },
+      unavailable: true,
     };
   }
 }
@@ -190,20 +294,10 @@ async function runLLMReview(code, params, isAiFlag) {
   Code:\n${cleanCode}`;
 
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: params.model || "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0.3 },
-      }),
+    const parsed = await generateJson(prompt, {
+      model: params.model,
+      generationOptions: { temperature: 0.3 },
     });
-
-    const data = await response.json();
-    const parsed = JSON.parse(data.response);
     return { score: parsed.score / 10, feedback: parsed.feedback };
   } catch (error) {
     return { score: 0, feedback: "AI Review failed." };
@@ -222,21 +316,7 @@ async function runComplexityAgent(code, requiredComplexity) {
   const prompt = `Analyze the time complexity of this C code. Look at the number of loops, nested loops, and step executions. Return ONLY a strict JSON object in this format: {"estimated": "<Big-O notation, e.g., O(1), O(N), O(N^2)>", "reason": "<one short sentence explaining why>"}. Code:\n${cleanCode}`;
 
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0 },
-      }),
-    });
-
-    if (!response.ok) throw new Error("Ollama API failed");
-    const data = await response.json();
-    const parsed = JSON.parse(data.response);
+    const parsed = await generateJson(prompt);
 
     const estClean = parsed.estimated.replace(/\s/g, "").toUpperCase();
     const reqClean = (requiredComplexity || "O(1)")
@@ -252,13 +332,8 @@ async function runComplexityAgent(code, requiredComplexity) {
       score = 1.0;
       feedback = `Passed! Complexity is ${parsed.estimated}. ${parsed.reason}`;
     } else {
-      // 🔥 SMART AI OVERRIDE 🔥
-      // AI knows instructor is wrong. It gives full marks to the student.
-      score = 1.0;
-      feedback = `Instructor targeted ${requiredComplexity}, but AI correctly estimated ${parsed.estimated}. ${parsed.reason} (Full points awarded for correct logic).`;
-      console.log(
-        `  🤖 AI Smart Override: Instructor Target was ${reqClean}, but actual is ${estClean}.`,
-      );
+      score = 0;
+      feedback = `Required complexity is ${requiredComplexity}, but the analysis estimated ${parsed.estimated}. ${parsed.reason}`;
     }
 
     return {
@@ -304,19 +379,7 @@ async function analyzeCompilationError(code, errorMessage) {
     }`;
 
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0.0 }, // 0.0 forces strict deterministic output
-      }),
-    });
-    const data = await response.json();
-    return JSON.parse(data.response);
+    return await generateJson(prompt);
   } catch (err) {
     return {
       hints: [
@@ -333,12 +396,19 @@ async function analyzeCompilationError(code, errorMessage) {
 // ---------------------------------------------------------
 async function runAIDetectorAgent(code) {
   console.log(`\n🕵️‍♂️ AI Plagiarism Detector analyzing code style...`);
+  const ollamaConfiguration = getConfiguration();
+  console.log(
+    `  🔌 Ollama endpoint: ${ollamaConfiguration.endpoint}; model: ${ollamaConfiguration.model}`,
+  );
   const cleanCode = String(code).replace(/\\n/g, "\n").replace(/\\t/g, "\t");
   const comments = cleanCode.match(/\/\/.*|\/\*[\s\S]*?\*\//g) || [];
   const functions = cleanCode.match(/\b[A-Za-z_]\w*\s*\([^;{}]*\)\s*\{/g) || [];
-  const longIdentifiers = (cleanCode.match(/\b[A-Za-z_]\w{11,}\b/g) || []).length;
+  const longIdentifiers = (cleanCode.match(/\b[A-Za-z_]\w{11,}\b/g) || [])
+    .length;
   const explanatoryComments = comments.filter((comment) =>
-    /\b(initializ|calculate|check|return|read|print|loop|factorial|input|output)\b/i.test(comment),
+    /\b(initializ|calculate|check|return|read|print|loop|factorial|input|output)\b/i.test(
+      comment,
+    ),
   ).length;
 
   // const prompt = `You are an expert AI code detector. Analyze this C code and predict if it was generated by an AI (like ChatGPT) or a human student.
@@ -381,24 +451,24 @@ Do not claim to determine who authored the code. Report only whether the code ha
 `;
 
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0.0 },
-      }),
+    console.log(
+      `  🔍 Observable traits: ${comments.length} comments, ${explanatoryComments} explanatory comments, ${functions.length} functions, ${longIdentifiers} long identifiers.`,
+    );
+    const parsed = await generateJson(prompt, {
+      timeoutMs: Number(
+        process.env.OLLAMA_AI_DETECTOR_TIMEOUT_MS || 120000,
+      ),
+      retries: Number(process.env.OLLAMA_AI_DETECTOR_RETRIES || 2),
     });
-
-    if (!response.ok) throw new Error("Ollama API failed");
-    const data = await response.json();
-    const parsed = JSON.parse(data.response);
-    const confidence = Math.max(0, Math.min(100, Number(parsed.confidence) || 0));
+    console.log(`  🔍 AI Detector Output: ${JSON.stringify(parsed)}`);
+    const confidence = Math.max(
+      0,
+      Math.min(100, Number(parsed.confidence) || 0),
+    );
     const modelEvidence = Array.isArray(parsed.evidence)
-      ? parsed.evidence.filter((item) => typeof item === "string" && item.trim()).slice(0, 5)
+      ? parsed.evidence
+          .filter((item) => typeof item === "string" && item.trim())
+          .slice(0, 5)
       : [];
     const strongObservableTraits = [
       explanatoryComments >= 2,
@@ -406,12 +476,13 @@ Do not claim to determine who authored the code. Report only whether the code ha
       functions.length >= 3,
       modelEvidence.length >= 3,
     ].filter(Boolean).length;
+    console.log(`  🔍 Strong observable traits: ${strongObservableTraits}`);
     // A review flag requires multiple observable traits and high model
     // confidence. Common algorithms and clean formatting alone are not enough.
     const signal = Boolean(
-      (parsed.signal ?? parsed.is_ai)
-      && confidence >= 85
-      && strongObservableTraits >= 2,
+      (parsed.signal ?? parsed.is_ai) &&
+      confidence >= 85 &&
+      strongObservableTraits >= 2,
     );
 
     console.log(
@@ -422,7 +493,10 @@ Do not claim to determine who authored the code. Report only whether the code ha
       is_ai: signal,
       confidence,
       reason: signal
-        ? String(parsed.reason || "Multiple observable traits merit instructor review.")
+        ? String(
+            parsed.reason ||
+              "Multiple observable traits merit instructor review.",
+          )
         : "No strong AI-style signal was established from the available observable traits.",
       evidence: modelEvidence,
       model_reason: String(parsed.reason || "No explanation was returned."),
@@ -438,23 +512,14 @@ Do not claim to determine who authored the code. Report only whether the code ha
       review_only: true,
     };
   } catch (error) {
-    console.log("  ❌ AI Detector Failed:", error.message);
-    return {
-      signal: false,
-      is_ai: false,
-      confidence: 0,
-      reason: "AI-style review was unavailable; no authorship conclusion was made.",
-      evidence: [],
-      source_summary: {
-        comments: comments.length,
-        explanatory_comments: explanatoryComments,
-        functions: functions.length,
-        long_identifiers: longIdentifiers,
-      },
-      method: "unavailable",
-      review_only: true,
-      error: error.message,
-    };
+    console.log(`  ⚠️ AI Detector LLM unavailable; using deterministic fallback: ${error.message}`);
+    return buildDeterministicAiReview({
+      comments,
+      explanatoryComments,
+      functions,
+      longIdentifiers,
+      error,
+    });
   }
 }
 
@@ -500,7 +565,9 @@ async function gradeSubmission(submissionId) {
       data: { status: "GRADING" },
     });
     if (claim.count !== 1) {
-      console.log(`Skipping submission ${submissionId}; it is already being graded or completed.`);
+      console.log(
+        `Skipping submission ${submissionId}; it is already being graded or completed.`,
+      );
       return;
     }
 
@@ -556,7 +623,9 @@ async function gradeSubmission(submissionId) {
           },
         ],
         flags: ["compilation_failed"],
-        limitations: ["Execution-dependent analyzers were blocked by compilation failure."],
+        limitations: [
+          "Execution-dependent analyzers were blocked by compilation failure.",
+        ],
       });
 
       await prisma.submission.update({
@@ -580,33 +649,33 @@ async function gradeSubmission(submissionId) {
         studentId: { not: submission.studentId },
         status: "COMPLETED",
       },
-      select: { id: true, code: true },
+      select: {
+        id: true,
+        code: true,
+        student: { select: { id: true, name: true, email: true } },
+      },
     });
 
     const execution = await executeConfiguredRules(rules, {
       firstPass,
-      runLogical: (cases) => runLogicalAgent(cases, workspace, {
-        timeLimitSec: rules.time_limit_s,
-        memoryLimitMb: rules.memory_limit_mb,
-      }),
+      runLogical: (cases) =>
+        runLogicalAgent(cases, workspace, {
+          timeLimitSec: rules.time_limit_s,
+          memoryLimitMb: rules.memory_limit_mb,
+        }),
       explainLogicalFailure: (failedCases) =>
         analyzeLogicalFailure(submission.code, failedCases),
-      runReadability: (params) =>
-        runLLMReview(submission.code, params, false),
+      runReadability: (params) => runLLMReview(submission.code, params, false),
       runComplexity: (required) =>
         Promise.resolve(runComplexityAnalyzer(submission.code, required)),
       runStructure: () => runStructureAnalyzer(submission.code),
       runModularity: (params) => runModularityAnalyzer(submission.code, params),
-      runMemorySafety: (params) => runMemorySafetyAnalyzer(
-        submission.code,
-        sandbox,
-        workspace,
-        {
+      runMemorySafety: (params) =>
+        runMemorySafetyAnalyzer(submission.code, sandbox, workspace, {
           timeLimitSec: rules.time_limit_s,
           memoryLimitMb: rules.memory_limit_mb,
           ...params,
-        },
-      ),
+        }),
       runOriginality: async (params) =>
         runOriginalityAnalyzer(
           submission.code,
@@ -625,18 +694,21 @@ async function gradeSubmission(submissionId) {
       const aiDetection = await runAIDetectorAgent(submission.code);
       reportMetrics.push({
         name: "ai_detection",
-        status: "SUCCEEDED",
+        status: aiDetection.error ? "SKIPPED" : "SUCCEEDED",
         score: null,
         weight: 0,
         contribution: null,
         reviewOnly: true,
         evidence: aiDetection,
         feedback: aiDetection.reason,
+        errors: aiDetection.error ? [aiDetection.error] : [],
       });
     }
-    if (!reportMetrics.some((metric) =>
-      ["originality", "similarity_flag"].includes(metric.name),
-    )) {
+    if (
+      !reportMetrics.some((metric) =>
+        ["originality", "similarity_flag"].includes(metric.name),
+      )
+    ) {
       const originality = await runOriginalityAnalyzer(
         submission.code,
         otherSubmissions,
@@ -660,6 +732,7 @@ async function gradeSubmission(submissionId) {
     let isPlagiarized = false;
     let plagiarismScore = 0;
     let matchedWithId = null;
+    let matchedWithStudent = null;
 
     // Basic Text Match (Spaces aur newlines hata kar raw logic compare karna)
     const normalizeCode = (c) => c.replace(/\s+/g, "").trim();
@@ -672,6 +745,7 @@ async function gradeSubmission(submissionId) {
         isPlagiarized = true;
         plagiarismScore = 100;
         matchedWithId = pastSub.id;
+        matchedWithStudent = pastSub.student;
         console.log(
           `  🚨 Plagiarism Match Found with Submission: ${pastSub.id}`,
         );
@@ -679,15 +753,20 @@ async function gradeSubmission(submissionId) {
       }
     }
     const exactMatchAction = rules.integrity.exact_peer_match_action;
-    const integrityPenalty = isPlagiarized && exactMatchAction !== "REVIEW_ONLY" ? 100 : 0;
+    const integrityPenalty =
+      isPlagiarized && exactMatchAction !== "REVIEW_ONLY" ? 100 : 0;
     const totalScore = integrityPenalty > 0 ? 0 : metricScore;
     const integrityDecision = isPlagiarized
       ? `EXACT_PEER_MATCH_${exactMatchAction}`
       : "NO_EXACT_PEER_MATCH";
     const reportFlags = [
       ...(reviewSignals.flags || []),
-      ...(isPlagiarized && exactMatchAction !== "REVIEW_ONLY" ? ["similarity_match"] : []),
-      ...(isPlagiarized && exactMatchAction === "REVIEW_ONLY" ? ["exact_match_review"] : []),
+      ...(isPlagiarized && exactMatchAction !== "REVIEW_ONLY"
+        ? ["similarity_match"]
+        : []),
+      ...(isPlagiarized && exactMatchAction === "REVIEW_ONLY"
+        ? ["exact_match_review"]
+        : []),
       ...(isPlagiarized && exactMatchAction === "BLOCK_SUBMISSION"
         ? ["integrity_blocked"]
         : []),
@@ -696,7 +775,7 @@ async function gradeSubmission(submissionId) {
     // 4. Save Final Report to Database
     console.log(
       `\n💾 Saving Final Score: ${totalScore}/100 to Database...` +
-      (isPlagiarized ? " Exact peer match detected; score set to 0." : ""),
+        (isPlagiarized ? " Exact peer match detected; score set to 0." : ""),
     );
     await prisma.submission.update({
       where: { id: submissionId },
@@ -717,6 +796,7 @@ async function gradeSubmission(submissionId) {
             exact_peer_match: isPlagiarized,
             similarity_score: plagiarismScore,
             matched_submission_id: matchedWithId,
+            matched_submission_student: matchedWithStudent,
             decision: integrityDecision,
             marks_before_integrity: metricScore,
             marks_deducted: integrityPenalty,
@@ -736,20 +816,28 @@ async function gradeSubmission(submissionId) {
                 ? "Peer-code similarity review produced a non-exact signal using the available submission corpus; marks affected: 0."
                 : "Peer-code similarity review found no high-similarity match in the available corpus; marks affected: 0.",
             ...(isPlagiarized && exactMatchAction !== "REVIEW_ONLY"
-              ? ["An exact normalized peer-code match was found; the assignment integrity policy set the final score to 0."]
+              ? [
+                  "An exact normalized peer-code match was found; the assignment integrity policy set the final score to 0.",
+                ]
               : []),
           ],
           limitations: [
             "Originality and AI-style signals are review indicators, not proof of misconduct.",
             "Static complexity and structure analysis are heuristic and depend on configured rules.",
             ...(reportMetrics.some((metric) => metric.name === "ai_detection")
-              ? ["AI-style analysis cannot reliably prove whether a person or AI authored code."]
-              : ["AI-style analysis was not configured for this assignment; no AI authorship signal was produced."]),
+              ? [
+                  "AI-style analysis cannot reliably prove whether a person or AI authored code.",
+                ]
+              : [
+                  "AI-style analysis was not configured for this assignment; no AI authorship signal was produced.",
+                ]),
             ...(reportMetrics.some((metric) =>
               ["originality", "similarity_flag"].includes(metric.name),
             )
               ? []
-              : ["Peer-code similarity analysis was not configured for this assignment."]),
+              : [
+                  "Peer-code similarity analysis was not configured for this assignment.",
+                ]),
           ],
         }),
       },
@@ -795,4 +883,4 @@ async function testRun() {
 // if (require.main === module) {
 //   testRun();
 // }
-module.exports = { gradeSubmission };
+module.exports = { gradeSubmission, formatExecutionValue };

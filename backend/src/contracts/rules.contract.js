@@ -36,6 +36,18 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeCaseValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(normalizeCaseValue).join(" ");
+  if (isPlainObject(value)) {
+    if (value.value !== undefined) return normalizeCaseValue(value.value);
+    if (value.input !== undefined) return normalizeCaseValue(value.input);
+    return Object.values(value).map(normalizeCaseValue).join(" ");
+  }
+  return String(value);
+}
+
 function parseRules(value) {
   if (typeof value === "string") {
     try {
@@ -92,8 +104,8 @@ function normalizeTestCase(testCase, index, visibility) {
     : typeof testCase.case === "string" && testCase.case.trim()
       ? testCase.case.trim()
       : `${visibility}_${index + 1}`;
-  const input = testCase.input === undefined ? "" : String(testCase.input);
-  const expected = testCase.expected === undefined ? "" : String(testCase.expected);
+  const input = normalizeCaseValue(testCase.input);
+  const expected = normalizeCaseValue(testCase.expected);
   if (!input.trim() && !expected.trim()) {
     throw new RuleValidationError(
       `${visibility} test case "${id}" must define input or expected output.`,

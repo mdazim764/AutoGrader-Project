@@ -59,6 +59,7 @@ export default function AgentReport({ result, loading, error }) {
     }
     if (metric.aiFeedback) {
       lines.push(`Explanation: ${metric.aiFeedback.explanation || 'N/A'}`);
+      if (metric.aiFeedback.root_cause) lines.push(`Likely cause: ${metric.aiFeedback.root_cause}`);
       lines.push(`Hint: ${metric.aiFeedback.hint || 'N/A'}`);
       if (metric.aiFeedback.counter_case) {
         lines.push(`Counterexample input: ${metric.aiFeedback.counter_case.input || 'N/A'}`);
@@ -189,6 +190,11 @@ export default function AgentReport({ result, loading, error }) {
               ? `Exact peer match: ${integrity.marks_deducted ?? 0} marks deducted by integrity policy.`
               : 'Non-integrity review signals affected 0 marks.'}
           </p>
+          {integrity.matched_submission_student?.name && (
+            <p className="mt-2 text-xs text-rose-200">
+              Matched submission owner: <span className="font-semibold">{integrity.matched_submission_student.name}</span>
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap gap-2">
             {report.flags.map((flag) => <span key={flag} className="rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-200">{flag}</span>)}
           </div>
@@ -242,9 +248,10 @@ export default function AgentReport({ result, loading, error }) {
                 {logicalDetails.map((tc, tIdx) => (
                   <div key={tIdx} className={`p-3 rounded-lg border text-sm flex justify-between items-center ${tc.passed ? 'bg-green-950/30 border-green-900/50 text-green-300' : 'bg-red-950/30 border-red-900/50 text-red-300'}`}>
                     <span><span className="font-semibold capitalize">{tc.case}</span> Test
-                      {(tc.input || tc.expected || tc.got) && <span className="mt-1 block text-xs text-slate-500">Input: {tc.input || '—'} · Expected: {tc.expected || '—'} · Actual: {tc.got || '—'}</span>}
+                      {(tc.input || tc.expected || tc.got) && <span className="mt-1 block text-xs text-slate-500">Input: {tc.input || '—'} · Expected: {tc.expected || '—'} · Actual: {tc.actual || tc.got || '—'}</span>}
+                      {!tc.passed && <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-rose-300">{String(tc.failureReason || (tc.timedOut ? 'TIMEOUT' : 'WRONG_OUTPUT')).replace(/_/g, ' ')}</span>}
                     </span>
-                    <span>{tc.passed ? '✅ Passed' : `❌ Failed (Got: ${tc.got})`}</span>
+                    <span>{tc.passed ? '✅ Passed' : tc.timedOut ? '❌ Timed out' : `❌ Failed (Got: ${tc.actual || tc.got || 'no output'})`}</span>
                   </div>
                 ))}
               </div>
@@ -255,7 +262,11 @@ export default function AgentReport({ result, loading, error }) {
                   <h5 className="font-bold text-orange-400 mb-2 flex items-center gap-2">
                     <Brain size={16} /> AI Logic Hint
                   </h5>
-                  <p className="text-sm text-gray-300 mb-3">{metric.aiFeedback.hint}</p>
+                  <div className="mb-3 space-y-2 text-sm text-gray-300">
+                    <p><span className="font-semibold text-orange-300">What failed:</span> {metric.aiFeedback.explanation || 'The program did not produce the expected result.'}</p>
+                    {metric.aiFeedback.root_cause && <p><span className="font-semibold text-orange-300">Likely cause:</span> {metric.aiFeedback.root_cause}</p>}
+                    <p><span className="font-semibold text-orange-300">How to improve:</span> {metric.aiFeedback.hint || 'Trace the failing input through the loop condition, initialization, and output statement.'}</p>
+                  </div>
                   <div className="bg-black/40 p-3 rounded border border-orange-900/30">
                     <p className="text-xs text-orange-300 uppercase font-bold tracking-wider mb-1">🚨 Counter Test Case Generated</p>
                     <div className="flex gap-4 text-sm font-mono">
@@ -305,6 +316,11 @@ export default function AgentReport({ result, loading, error }) {
                   </span>
                 </h4>
                 <p className="text-sm text-gray-300"><span className="font-semibold opacity-80">Analysis:</span> {reason}</p>
+                {evidence.analysis_mode === 'fallback' && (
+                  <p className="mt-2 text-xs text-amber-300">
+                    LLM review was unavailable. This result used deterministic source-trait analysis and did not affect marks.
+                  </p>
+                )}
               </div>
             );
         }

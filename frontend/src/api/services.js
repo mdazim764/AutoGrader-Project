@@ -12,6 +12,7 @@ export const problemAPI = {
 
 export const submissionAPI = {
   submitCode: (data) => api.post("/submissions", data),
+  getLatest: (problemId) => api.get("/submissions/latest", { params: { problemId } }),
   getReport: (id) => api.get(`/submissions/${id}`),
   getAll: () => api.get("/submissions"),
 };

@@ -44,6 +44,21 @@ async function getSubmission(req, res) {
   }
 }
 
+async function getLatestSubmission(req, res) {
+  try {
+    if (!req.query.problemId) {
+      return res.status(400).json({ error: "Problem ID is required." });
+    }
+    const submission = await submissionService.getLatestSubmission(
+      req.query.problemId,
+      req.user.id,
+    );
+    res.json(submission);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message || "Failed to fetch the latest submission." });
+  }
+}
+
 async function listSubmissions(req, res) {
   try {
     res.json(await submissionService.listSubmissions());
@@ -52,4 +67,4 @@ async function listSubmissions(req, res) {
   }
 }
 
-module.exports = { createSubmission, getSubmission, listSubmissions };
+module.exports = { createSubmission, getSubmission, getLatestSubmission, listSubmissions };

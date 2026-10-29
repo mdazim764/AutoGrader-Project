@@ -3,6 +3,10 @@ const assert = require("node:assert/strict");
 const { collateResults } = require("../src/rules/score-collator");
 const { runOriginalityAnalyzer } = require("../src/analyzers/originality.analyzer");
 const {
+  formatExecutionValue,
+} = require("../src/services/agent_coordinator.legacy");
+const { executeConfiguredRules } = require("../src/rules/rule-engine.service");
+const {
   normalizeAnalyzerResult,
   calculateFinalScore,
 } = require("../src/contracts/analyzer-result.contract");
@@ -82,4 +86,30 @@ test("originality leaves materially different code below the threshold", () => {
 
   assert.equal(result.evidence.flagged, false);
   assert.equal(result.score, 1);
+});
+
+test("formats structured test values into stdin-safe text", () => {
+  assert.equal(formatExecutionValue(121), "121");
+  assert.equal(formatExecutionValue([1, 2, 3]), "1 2 3");
+  assert.equal(formatExecutionValue({ value: "racecar" }), "racecar");
+  assert.equal(formatExecutionValue({ input: 10 }), "10");
+});
+
+test("marks unavailable AI review as skipped without affecting the grade", async () => {
+  const result = await executeConfiguredRules(
+    {
+      metrics: [{ name: "ai_detection", analyzer: "ai_detection", weight: 0, params: {} }],
+    },
+    {
+      runAiDetection: async () => ({
+        signal: false,
+        error: "Ollama is unavailable",
+        reason: "AI review was unavailable.",
+      }),
+    },
+  );
+
+  assert.equal(result.metrics[0].status, "SKIPPED");
+  assert.equal(result.metrics[0].contribution, null);
+  assert.equal(result.finalScore, 0);
 });

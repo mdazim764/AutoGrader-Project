@@ -83,6 +83,7 @@ export default function StudentDashboard() {
   const [grading, setGrading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [restoring, setRestoring] = useState(false);
   const [problemMenuOpen, setProblemMenuOpen] = useState(false);
   const pollRef = useRef(null);
   const problemMenuRef = useRef(null);
@@ -123,6 +124,25 @@ export default function StudentDashboard() {
     setCode(BASE_C_CODE);
     setResult(null);
     setError(null);
+    restoreLatestSubmission(selected);
+  };
+
+  const restoreLatestSubmission = async (selectedProblem = problem, showLoading = true) => {
+    if (!selectedProblem) return;
+    if (showLoading) setRestoring(true);
+    try {
+      const { data } = await submissionAPI.getLatest(selectedProblem.id);
+      if (data?.code) setCode(data.code);
+      if (data?.report || data?.status === 'COMPLETED' || data?.status === 'FAILED') {
+        setResult(data);
+      }
+    } catch (restoreError) {
+      if (restoreError.response?.status !== 404) {
+        setError(restoreError.response?.data?.error || 'Unable to restore the latest submission.');
+      }
+    } finally {
+      if (showLoading) setRestoring(false);
+    }
   };
 
   const handleCodeFileLoad = (file) => {
@@ -204,6 +224,9 @@ export default function StudentDashboard() {
                 </div>
               )}
             </div>
+            <button type="button" onClick={() => restoreLatestSubmission()} disabled={grading || loading || restoring || !problem} className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
+              {restoring ? 'Loading...' : 'Load last submission'}
+            </button>
             <button onClick={handleSubmit} disabled={grading || loading || !problem} className="flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-6 py-3 font-semibold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50">
               {grading ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Grading...</> : <><Play size={18} /> Submit solution</>}
             </button>
