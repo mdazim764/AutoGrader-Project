@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.1",
+  "problem": "calculate_factorial",
+  "time_limit_s": 2,
+  "memory_limit_mb": 64,
+  "tests": {
+    "public": [
+      { "case": "basic_positive", "input": "5", "expected": "120" },
+      { "case": "zero_case", "input": "0", "expected": "1" }
+    ],
+    "hidden": [
+      { "case": "edge_negative", "input": "-3", "expected": "0" },
+      { "case": "large_number", "input": "12", "expected": "479001600" }
+    ]
+  },
+  "integrity": {
+    "exact_peer_match_action": "ZERO_SCORE",
+    "similarity_review_threshold": 0.85,
+    "similarity_action": "REVIEW_ONLY",
+    "ai_action": "REVIEW_ONLY"
+  },
+  "metrics": [
+    {
+      "name": "logical",
+      "analyzer": "io_tests",
+      "weight": 0.50
+    },
+    {
+      "name": "complexity",
+      "analyzer": "complexity_estimator",
+      "weight": 0.30,
+      "params": { "required": "O(N)" }
+    },
+    {
+      "name": "readability",
+      "analyzer": "llm_review",
+      "weight": 0.20,
+      "params": { "model": "llama3.1:8b", "temperature": 0.1 }
+    }
+  ]
+}

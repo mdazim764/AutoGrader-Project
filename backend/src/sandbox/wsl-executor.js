@@ -10,6 +10,11 @@ function shellQuote(value) {
 }
 
 function toWslPath(value) {
+  const isWindows = os.platform() === "win32";
+  if (!isWindows) {
+    return value; // Agar Linux hai toh path waisa hi rehne do
+  }
+
   const resolved = path.resolve(value);
   const match = resolved.match(/^([A-Za-z]):\\(.*)$/);
   if (!match) {
@@ -18,17 +23,28 @@ function toWslPath(value) {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, "/")}`;
 }
 
-function runWsl(script, timeoutMs) {
+function runCommand(script, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn("wsl.exe", ["-e", "bash", "-lc", script], {
+    // Check if the OS is Windows
+    const isWindows = os.platform() === "win32";
+
+    // Set the command and arguments based on the OS
+    const cmd = isWindows ? "wsl.exe" : "bash";
+    const args = isWindows ? ["-e", "bash", "-lc", script] : ["-c", script];
+
+    const child = spawn(cmd, args, {
       windowsHide: true,
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
 
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -47,17 +63,19 @@ function runWsl(script, timeoutMs) {
 }
 
 async function ensureAvailable() {
-  const check = "command -v bash >/dev/null && command -v gcc >/dev/null && command -v timeout >/dev/null";
+  const check =
+    "command -v bash >/dev/null && command -v gcc >/dev/null && command -v timeout >/dev/null";
   let lastResult;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    lastResult = await runWsl(check, 15000);
+    lastResult = await runCommand(check, 15000);
     if (!lastResult.timedOut && lastResult.code === 0) return;
   }
 
   const detail = lastResult?.timedOut
     ? "The WSL command timed out while starting."
-    : lastResult?.stderr?.trim() || `Prerequisite check exited with code ${lastResult?.code ?? "unknown"}.`;
+    : lastResult?.stderr?.trim() ||
+      `Prerequisite check exited with code ${lastResult?.code ?? "unknown"}.`;
   throw new Error(
     `WSL2 with bash, gcc, and coreutils timeout is required for safe grading. ${detail} Install WSL2, a Linux distribution, bash, gcc, and coreutils before grading submissions.`,
   );
@@ -66,7 +84,9 @@ async function ensureAvailable() {
 function compilationReason(result, stderr) {
   if (result.timedOut) return "Compilation timeout";
   if (result.code !== 0) return "Compilation failed";
-  return stderr ? "Compilation succeeded with warnings" : "Compilation succeeded";
+  return stderr
+    ? "Compilation succeeded with warnings"
+    : "Compilation succeeded";
 }
 
 async function createWorkspace(submissionId, code) {
@@ -87,9 +107,11 @@ async function compile(workspace, timeLimitSec) {
     "ulimit -f 1024",
     `timeout --signal=KILL ${Math.max(1, timeLimitSec)}s gcc -O2 -Wall -Wextra -std=c11 submission.c -o submission 2>compile.stderr`,
   ].join(" && ");
-  const result = await runWsl(script, compileTimeout + 1000);
+  const result = await runCommand(script, compileTimeout + 1000);
   const stderrPath = path.join(workspace, "compile.stderr");
-  const stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, "utf8") : result.stderr;
+  const stderr = fs.existsSync(stderrPath)
+    ? fs.readFileSync(stderrPath, "utf8")
+    : result.stderr;
   return {
     success: !result.timedOut && result.code === 0,
     warnings: stderr,
@@ -117,9 +139,17 @@ async function run(workspace, input, limits) {
   return {
     passed: !result.timedOut && result.code === 0,
     timedOut: result.timedOut || result.code === 124 || result.code === 137,
-    crashed: !result.timedOut && result.code !== 0 && result.code !== 124 && result.code !== 137,
-    output: fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8") : "",
-    error: fs.existsSync(errorPath) ? fs.readFileSync(errorPath, "utf8") : result.stderr,
+    crashed:
+      !result.timedOut &&
+      result.code !== 0 &&
+      result.code !== 124 &&
+      result.code !== 137,
+    output: fs.existsSync(outputPath)
+      ? fs.readFileSync(outputPath, "utf8")
+      : "",
+    error: fs.existsSync(errorPath)
+      ? fs.readFileSync(errorPath, "utf8")
+      : result.stderr,
     exitCode: result.code,
   };
 }
@@ -138,15 +168,20 @@ async function runSanitized(workspace, input, limits) {
     `timeout --signal=KILL ${timeoutSec}s bash -c 'ulimit -u 32; exec ./sanitized' < sanitizer-input.txt > sanitizer-output.txt 2> sanitizer.stderr`,
   ].join(" && ");
   const result = await runWsl(script, timeoutSec * 1000 + 3000);
-  const read = (file) => fs.existsSync(path.join(workspace, file))
-    ? fs.readFileSync(path.join(workspace, file), "utf8")
-    : "";
+  const read = (file) =>
+    fs.existsSync(path.join(workspace, file))
+      ? fs.readFileSync(path.join(workspace, file), "utf8")
+      : "";
   const compileError = read("sanitizer-compile.stderr");
   const runtimeError = read("sanitizer.stderr");
   return {
     passed: !result.timedOut && result.code === 0,
     timedOut: result.timedOut || result.code === 124 || result.code === 137,
-    crashed: !result.timedOut && result.code !== 0 && result.code !== 124 && result.code !== 137,
+    crashed:
+      !result.timedOut &&
+      result.code !== 0 &&
+      result.code !== 124 &&
+      result.code !== 137,
     output: read("sanitizer-output.txt"),
     error: compileError || runtimeError || result.stderr,
     exitCode: result.code,

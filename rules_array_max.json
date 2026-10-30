@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.1",
+  "problem": "find_maximum_in_array",
+  "time_limit_s": 1,
+  "memory_limit_mb": 128,
+  "tests": {
+    "public": [
+      { "case": "basic_array", "input": "5\n10 25 5 45 30", "expected": "45" },
+      { "case": "single_element", "input": "1\n99", "expected": "99" }
+    ],
+    "hidden": [
+      { "case": "all_negatives", "input": "4\n-10 -5 -20 -100", "expected": "-5" },
+      { "case": "duplicates", "input": "6\n5 5 5 5 5 5", "expected": "5" }
+    ]
+  },
+  "integrity": {
+    "exact_peer_match_action": "ZERO_SCORE",
+    "similarity_review_threshold": 0.90,
+    "similarity_action": "REVIEW_ONLY",
+    "ai_action": "REVIEW_ONLY"
+  },
+  "metrics": [
+    {
+      "name": "logical",
+      "analyzer": "io_tests",
+      "weight": 0.60
+    },
+    {
+      "name": "complexity",
+      "analyzer": "complexity_estimator",
+      "weight": 0.20,
+      "params": { "required": "O(N)" }
+    },
+    {
+      "name": "readability",
+      "analyzer": "llm_review",
+      "weight": 0.20,
+      "params": { "model": "llama3.1:8b", "temperature": 0.1 }
+    }
+  ]
+}
