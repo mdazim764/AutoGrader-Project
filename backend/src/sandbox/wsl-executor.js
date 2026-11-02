@@ -133,7 +133,7 @@ async function run(workspace, input, limits) {
     "ulimit -f 1024",
     `timeout --signal=KILL ${timeoutSec}s bash -c 'ulimit -u 32; exec ./submission' < input.txt > output.txt 2> runtime.stderr`,
   ].join(" && ");
-  const result = await runWsl(script, timeoutSec * 1000 + 1000);
+  const result = await runCommand(script, timeoutSec * 1000 + 1000);
   const outputPath = path.join(workspace, "output.txt");
   const errorPath = path.join(workspace, "runtime.stderr");
   return {
@@ -167,7 +167,7 @@ async function runSanitized(workspace, input, limits) {
     "gcc -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer submission.c -o sanitized 2> sanitizer-compile.stderr",
     `timeout --signal=KILL ${timeoutSec}s bash -c 'ulimit -u 32; exec ./sanitized' < sanitizer-input.txt > sanitizer-output.txt 2> sanitizer.stderr`,
   ].join(" && ");
-  const result = await runWsl(script, timeoutSec * 1000 + 3000);
+  const result = await runCommand(script, timeoutSec * 1000 + 3000);
   const read = (file) =>
     fs.existsSync(path.join(workspace, file))
       ? fs.readFileSync(path.join(workspace, file), "utf8")
