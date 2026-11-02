@@ -2,7 +2,7 @@ const problemService = require("../services/problem.service");
 
 async function listProblems(req, res) {
   try {
-    res.json(await problemService.listProblems());
+    res.json(await problemService.listProblems(req.user));
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch problems." });
   }

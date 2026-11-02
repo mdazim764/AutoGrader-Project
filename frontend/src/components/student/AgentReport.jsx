@@ -28,6 +28,9 @@ export default function AgentReport({ result, loading, error }) {
   const usefulness = report.usefulness_limitations || {};
   const reviewOnlyMetrics = metrics.filter((metric) => metric.reviewOnly);
   const integrity = report.integrity || {};
+  const testExecution = report.test_execution || {};
+  const hiddenTestCount = testExecution.configured?.hidden_count ?? 0;
+  const hasHiddenTests = hiddenTestCount > 0;
   const formatMetricReport = (metric, index) => {
     const details = metric?.details && typeof metric.details === 'object' ? metric.details : {};
     const evidence = metric?.evidence && typeof metric.evidence === 'object' ? metric.evidence : {};
@@ -90,6 +93,16 @@ export default function AgentReport({ result, loading, error }) {
         `- Submission hash: ${report.submission?.hash || 'N/A'}`,
         `- Rules hash: ${report.rules_hash || 'N/A'}`,
         `- Test-set hash: ${report.test_set_hash || 'N/A'}`,
+        '',
+        'Test execution coverage:',
+        `- Configured public tests: ${testExecution.configured?.public_count ?? 'N/A'}`,
+        `- Configured hidden tests: ${testExecution.configured?.hidden_count ?? 'N/A'}`,
+        `- Executed public tests: ${testExecution.executed?.public_count ?? 'N/A'}`,
+        `- Executed hidden tests: ${testExecution.executed?.hidden_count ?? 'N/A'}`,
+        `- All configured tests executed: ${testExecution.executed?.all_configured ?? 'N/A'}`,
+        ...(testExecution.counter_cases?.length
+          ? testExecution.counter_cases.map((counterCase) => `- Generated counter case: ${counterCase.input ?? 'N/A'} -> ${counterCase.expected ?? 'N/A'} (${counterCase.status})`)
+          : ['- Generated counter cases: None']),
         '',
         'First-pass execution:',
         `- Compiled: ${firstPass.success ?? 'N/A'}`,
@@ -201,6 +214,49 @@ export default function AgentReport({ result, loading, error }) {
         </div>
       )}
 
+      {Object.keys(testExecution).length > 0 && (
+        <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/20 p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="font-semibold text-cyan-300">Test execution coverage</h4>
+              <p className="mt-1 text-xs text-cyan-100/70">Configured tests are deterministic and contribute to grading. Generated counter cases are advisory unless added to the rules.</p>
+            </div>
+            <span className={`rounded-full px-3 py-1 text-xs ${!hasHiddenTests ? 'bg-amber-500/15 text-amber-300' : testExecution.executed?.all_configured ? 'bg-green-500/15 text-green-300' : 'bg-amber-500/15 text-amber-300'}`}>
+              {!hasHiddenTests ? 'No hidden tests' : testExecution.executed?.all_configured ? 'Complete' : 'Check coverage'}
+            </span>
+          </div>
+          <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ['Public configured', testExecution.configured?.public_count],
+              ['Hidden configured', testExecution.configured?.hidden_count],
+              ['Public executed', testExecution.executed?.public_count],
+              ['Hidden executed', testExecution.executed?.hidden_count],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-cyan-900/40 bg-slate-950/70 p-3">
+                <span className="block text-slate-500">{label}</span>
+                <span className="mt-1 block text-lg font-semibold text-slate-200">{value ?? 'N/A'}</span>
+              </div>
+            ))}
+          </div>
+          {testExecution.counter_cases?.length > 0 && (
+            <div className="mt-4 rounded-lg border border-orange-900/40 bg-orange-950/20 p-3 text-xs text-orange-200">
+              <p className="font-semibold">Generated counter cases</p>
+              {testExecution.counter_cases.map((counterCase, index) => (
+                <p key={`${counterCase.source_metric}-${index}`} className="mt-1 font-mono">
+                  {counterCase.input || 'N/A'} &rarr; {counterCase.expected || 'N/A'} &middot; {counterCase.status}
+                </p>
+              ))}
+            </div>
+          )}
+          {testExecution.generation?.status && (
+            <p className="mt-3 text-xs text-cyan-200/80">
+              Hidden-test source: <span className="font-semibold">{testExecution.generation.status === 'GENERATED' ? `AI-generated and persisted (${testExecution.generation.count || hiddenTestCount} cases)` : testExecution.generation.status}</span>
+            </p>
+          )}
+          <p className="mt-3 text-xs text-slate-400">{!hasHiddenTests ? 'No hidden tests were present in the saved instructor rules for this submission.' : testExecution.note || 'No test execution note was recorded.'}</p>
+        </div>
+      )}
+
       {metrics.map((metric, idx) => {
         const details = metric?.details && typeof metric.details === 'object'
           ? metric.details
@@ -248,6 +304,7 @@ export default function AgentReport({ result, loading, error }) {
                 {logicalDetails.map((tc, tIdx) => (
                   <div key={tIdx} className={`p-3 rounded-lg border text-sm flex justify-between items-center ${tc.passed ? 'bg-green-950/30 border-green-900/50 text-green-300' : 'bg-red-950/30 border-red-900/50 text-red-300'}`}>
                     <span><span className="font-semibold capitalize">{tc.case}</span> Test
+                      <span className="ml-2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">{tc.visibility || 'public'}</span>
                       {(tc.input || tc.expected || tc.got) && <span className="mt-1 block text-xs text-slate-500">Input: {tc.input || '—'} · Expected: {tc.expected || '—'} · Actual: {tc.actual || tc.got || '—'}</span>}
                       {!tc.passed && <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-rose-300">{String(tc.failureReason || (tc.timedOut ? 'TIMEOUT' : 'WRONG_OUTPUT')).replace(/_/g, ' ')}</span>}
                     </span>

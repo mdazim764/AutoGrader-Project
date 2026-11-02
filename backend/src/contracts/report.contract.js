@@ -36,6 +36,7 @@ function createReport({
   finalScore = null,
   flags = [],
   integrity = null,
+  testExecution = null,
   usefulness = [],
   limitations = [],
   generatedBy = "backend-grading-worker",
@@ -58,6 +59,7 @@ function createReport({
     overall_score: finalScore,
     flags,
     ...(integrity ? { integrity } : {}),
+    ...(testExecution ? { test_execution: testExecution } : {}),
     generated_by: generatedBy,
     usefulness_limitations: {
       usefulness,

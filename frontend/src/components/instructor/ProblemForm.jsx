@@ -22,6 +22,37 @@ function parseRules(value) {
   return rules || {};
 }
 
+function parseProblemDocument(value) {
+  const document = parseRules(value);
+  const nestedProblem = document.problem && typeof document.problem === 'object'
+    ? document.problem
+    : {};
+  const rules = document.rules && typeof document.rules === 'object'
+    ? { ...document.rules }
+    : { ...document };
+
+  const sourceTests = rules.tests || document.tests || {};
+  const publicTests = sourceTests.public || sourceTests.public_tests || document.public_tests || [];
+  const hiddenTests = sourceTests.hidden || sourceTests.hidden_tests || document.hidden_tests || document.hidden || [];
+  rules.tests = {
+    ...sourceTests,
+    public: Array.isArray(publicTests) ? publicTests : [],
+    hidden: Array.isArray(hiddenTests) ? hiddenTests : [],
+  };
+  if (!rules.metrics && document.metrics) rules.metrics = document.metrics;
+  if (!rules.integrity && document.integrity) rules.integrity = document.integrity;
+  if (rules.time_limit_s === undefined && document.time_limit_s !== undefined) rules.time_limit_s = document.time_limit_s;
+  if (rules.memory_limit_mb === undefined && document.memory_limit_mb !== undefined) rules.memory_limit_mb = document.memory_limit_mb;
+
+  return {
+    title: document.title || nestedProblem.title || '',
+    statement: document.statement || nestedProblem.statement || '',
+    timeLimitSec: document.timeLimitSec || nestedProblem.timeLimitSec || rules.time_limit_s,
+    memoryLimitMb: document.memoryLimitMb || nestedProblem.memoryLimitMb || rules.memory_limit_mb,
+    rules,
+  };
+}
+
 function normalizeCase(value) {
   if (typeof value !== 'string') {
     const generated = generatedCases[value.case] || {};
@@ -91,7 +122,7 @@ export default function ProblemForm() {
     }
 
     const problem = allProblems.find((item) => item.id === id);
-    const rules = parseRules(problem?.rules);
+    const rules = parseProblemDocument(problem?.rules).rules;
     setImportedRules(rules);
     const metrics = Array.isArray(rules.metrics) ? rules.metrics : [];
     const logical = metrics.find((metric) => metric.name === 'logical');
@@ -128,7 +159,8 @@ export default function ProblemForm() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const imported = parseRules(String(reader.result || ''));
+        const importedDocument = parseProblemDocument(String(reader.result || ''));
+        const imported = importedDocument.rules;
         if (!Array.isArray(imported.metrics) || imported.metrics.length === 0) {
           throw new Error('The JSON file must contain a non-empty metrics array.');
         }
@@ -136,8 +168,10 @@ export default function ProblemForm() {
         if (Math.abs(totalWeight - 1) > 0.000001) {
           throw new Error(`Metric weights must sum to 1.0; received ${totalWeight.toFixed(3)}.`);
         }
-        setTimeLimit(imported.time_limit_s || timeLimit);
-        setMemoryLimit(imported.memory_limit_mb || memoryLimit);
+        if (importedDocument.title) setTitle(importedDocument.title);
+        if (importedDocument.statement) setStatement(importedDocument.statement);
+        setTimeLimit(importedDocument.timeLimitSec || imported.time_limit_s || timeLimit);
+        setMemoryLimit(importedDocument.memoryLimitMb || imported.memory_limit_mb || memoryLimit);
         setImportedRules(imported);
         setHiddenCases(Array.isArray(imported.tests?.hidden) ? imported.tests.hidden.map(normalizeCase) : []);
         setExactMatchAction(imported.integrity?.exact_peer_match_action || 'ZERO_SCORE');
@@ -145,10 +179,13 @@ export default function ProblemForm() {
         const complexityRule = imported.metrics.find((metric) => ['complexity', 'complexity_estimator'].includes(metric.name || metric.analyzer));
         setComplexity(complexityRule?.params?.required || complexity);
         const logicalRule = imported.metrics.find((metric) => ['logical', 'edge_case_runner', 'io_tests'].includes(metric.name || metric.analyzer));
-        if (Array.isArray(logicalRule?.params?.cases) && logicalRule.params.cases.length) {
-          setTestCases(logicalRule.params.cases.map(normalizeCase));
+        const importedPublicCases = Array.isArray(imported.tests?.public) && imported.tests.public.length
+          ? imported.tests.public
+          : logicalRule?.params?.cases;
+        if (Array.isArray(importedPublicCases) && importedPublicCases.length) {
+          setTestCases(importedPublicCases.map(normalizeCase));
         }
-        setMessage({ type: 'success', text: `Imported ${imported.metrics.length} rubric metrics from ${file.name}. Review and save the assignment.` });
+        setMessage({ type: 'success', text: `Imported ${imported.metrics.length} rubric metrics, problem content, limits, and tests from ${file.name}. Review and save the assignment.` });
       } catch (error) {
         setMessage({ type: 'error', text: error.message || 'Unable to parse the rules JSON file.' });
       }

@@ -124,6 +124,7 @@ function normalizeTestCase(testCase, index, visibility) {
     case: typeof testCase.case === "string" && testCase.case.trim()
       ? testCase.case.trim()
       : id,
+    visibility: visibility.toLowerCase(),
     input,
     expected,
     ...(weight === null ? {} : { weight }),
@@ -133,14 +134,32 @@ function normalizeTestCase(testCase, index, visibility) {
 
 function normalizeTests(parsed) {
   const configured = isPlainObject(parsed.tests) ? parsed.tests : {};
-  const hasExplicitTests = Array.isArray(configured.public) || Array.isArray(configured.hidden);
+  const configuredPublicValues = Array.isArray(configured.public)
+    ? configured.public
+    : Array.isArray(configured.public_tests)
+      ? configured.public_tests
+      : Array.isArray(parsed.public_tests)
+        ? parsed.public_tests
+        : [];
+  const hiddenValues = Array.isArray(configured.hidden)
+    ? configured.hidden
+    : Array.isArray(configured.hidden_tests)
+      ? configured.hidden_tests
+      : Array.isArray(parsed.hidden_tests)
+        ? parsed.hidden_tests
+        : Array.isArray(parsed.hidden)
+          ? parsed.hidden
+          : [];
   const legacyCases = parsed.metrics
     .flatMap((metric) => Array.isArray(metric.params?.cases) ? metric.params.cases : [])
     .filter((testCase, index, cases) =>
       cases.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(testCase)) === index,
     );
-  const publicValues = Array.isArray(configured.public) ? configured.public : [];
-  const hiddenValues = Array.isArray(configured.hidden) ? configured.hidden : [];
+  const hiddenKeys = new Set(hiddenValues.map((testCase) => JSON.stringify(testCase)));
+  const publicValues = configuredPublicValues.length > 0
+    ? configuredPublicValues
+    : legacyCases.filter((testCase) => !hiddenKeys.has(JSON.stringify(testCase)));
+  const hasExplicitTests = publicValues.length > 0 || hiddenValues.length > 0;
   const publicCases = publicValues.map((testCase, index) =>
     normalizeTestCase(
       typeof testCase === "string"
@@ -158,11 +177,12 @@ function normalizeTests(parsed) {
     public: publicCases,
     hidden: hiddenCases,
     has_explicit_tests: hasExplicitTests,
+    ...(isPlainObject(configured.generation) ? { generation: configured.generation } : {}),
   };
 }
 
 function normalizeProblemSpec(value) {
-  if (value === undefined) return null;
+  if (value === undefined || value === null) return null;
   if (!isPlainObject(value)) {
     throw new RuleValidationError("problem_spec must be a JSON object.");
   }
@@ -262,6 +282,7 @@ function validateRules(value, limits = {}) {
     tests: {
       public: tests.public,
       hidden: tests.hidden,
+      has_explicit_tests: tests.has_explicit_tests,
     },
     problem_spec: problemSpec,
     integrity,

@@ -17,6 +17,7 @@ const {
 } = require("../analyzers/memory-safety.analyzer");
 const { buildReportMetadata } = require("../reporting/report-metadata");
 const { generateJson, getConfiguration } = require("./agents/ollama.client");
+const { generateHiddenTests } = require("./agents/hidden-tests.agent");
 
 // Database Initialization (Prisma 7 format)
 const connectionString = process.env.DATABASE_URL;
@@ -86,6 +87,12 @@ function generateEdgeCase(caseType) {
         expected: "-2147483648",
         desc: "INT_MAX overflow",
       };
+    case "check 1":
+      return { input: "1", expected: "1", desc: "Factorial of one" };
+    case "check 0":
+      return { input: "0", expected: "1", desc: "Factorial of zero" };
+    case "big input":
+      return { input: "10", expected: "3628800", desc: "Larger factorial" };
     default:
       return null;
   }
@@ -129,8 +136,11 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
   const details = [];
 
   for (const testCase of normalizedCases) {
-    const input = formatExecutionValue(testCase.input);
-    const expected = formatExecutionValue(testCase.expected);
+    const generated = (!testCase.input || !testCase.expected)
+      ? generateEdgeCase(testCase.case)
+      : null;
+    const input = formatExecutionValue(generated?.input ?? testCase.input);
+    const expected = formatExecutionValue(generated?.expected ?? testCase.expected);
     if (!input || !expected) {
       details.push({
         case: testCase.case,
@@ -170,6 +180,9 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
     if (result.passed) score++;
     details.push({
       case: testCase.case,
+      visibility: testCase.visibility || "public",
+      source: "configured",
+      executed: true,
       input,
       expected,
       passed: result.passed,
@@ -189,6 +202,150 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
     score: normalizedCases.length > 0 ? score / normalizedCases.length : 0,
     details,
   };
+}
+
+function buildTestExecutionSummary(rules, metrics) {
+  const logicalMetric = metrics.find((metric) =>
+    ["logical", "correctness", "io_tests", "edge_case_runner"].includes(metric.name)
+      && Array.isArray(metric.evidence?.details),
+  );
+  const details = logicalMetric?.evidence?.details || [];
+  const hasExplicitTests = rules.tests?.has_explicit_tests === true;
+  const configuredPublic = hasExplicitTests ? (rules.tests?.public || []) : details;
+  const configuredHidden = hasExplicitTests ? (rules.tests?.hidden || []) : [];
+  const count = (items, visibility) => items.filter((item) => item.visibility === visibility).length;
+  const passed = (items, visibility) => items.filter((item) => item.visibility === visibility && item.passed).length;
+  const failed = (items, visibility) => items.filter((item) => item.visibility === visibility && !item.passed).length;
+  const counterCases = metrics
+    .filter((metric) => metric.aiFeedback?.counter_case)
+    .map((metric) => ({
+      source_metric: metric.name,
+      input: metric.aiFeedback.counter_case.input ?? null,
+      expected: metric.aiFeedback.counter_case.expected ?? null,
+      status: "GENERATED_NOT_EXECUTED",
+      executed: false,
+      scored: false,
+    }));
+  const generation = rules.tests?.generation || { status: "INSTRUCTOR_CONFIGURED" };
+  const generationNote = generation.status === "GENERATED"
+    ? `Hidden tests were generated once by ${generation.model || "the AI test designer"}, persisted in the problem rules, and reused for later submissions.`
+    : generation.status === "UNAVAILABLE"
+      ? `Hidden-test generation was unavailable: ${generation.reason || "the AI test designer could not be reached"}.`
+      : counterCases.length
+        ? "Counter cases are generated as advisory feedback after a deterministic failure; they are not included in the score unless explicitly added to the instructor rules."
+        : "All executed cases came from the instructor-configured test set.";
+
+  return {
+    configured: {
+      public_count: configuredPublic.length,
+      hidden_count: configuredHidden.length,
+      total_count: configuredPublic.length + configuredHidden.length,
+    },
+    executed: {
+      public_count: count(details, "public"),
+      hidden_count: count(details, "hidden"),
+      total_count: details.length,
+      all_configured: details.length === configuredPublic.length + configuredHidden.length,
+    },
+    results: {
+      public_passed: passed(details, "public"),
+      public_failed: failed(details, "public"),
+      hidden_passed: passed(details, "hidden"),
+      hidden_failed: failed(details, "hidden"),
+    },
+    generation,
+    counter_cases: counterCases,
+    note: generationNote,
+  };
+}
+
+async function materializeHiddenTests(problem, rules) {
+  const canonicalPublicTests = (rules.tests?.public || []).map((testCase) => {
+    const generated = (!testCase.input || !testCase.expected)
+      ? generateEdgeCase(testCase.case)
+      : null;
+    return generated
+      ? { ...testCase, input: generated.input, expected: generated.expected }
+      : testCase;
+  });
+  const rawTests = problem.rules && typeof problem.rules === "object"
+    ? problem.rules.tests
+    : null;
+  const publicKeys = new Set(
+    canonicalPublicTests.map((testCase) => `${testCase.input}\u0000${testCase.expected}`),
+  );
+  const canonicalHiddenTests = (rules.tests?.hidden || []).filter(
+    (testCase) => !publicKeys.has(`${testCase.input}\u0000${testCase.expected}`),
+  );
+  const publicTestsChanged = JSON.stringify(canonicalPublicTests)
+    !== JSON.stringify(rules.tests?.public || []);
+  const hiddenTestsChanged = canonicalHiddenTests.length !== (rules.tests?.hidden || []).length;
+  const needsCanonicalTestRepair = Boolean(
+    publicTestsChanged
+      || hiddenTestsChanged
+      || (rules.tests?.public?.length > 0
+        && (!rawTests || !Array.isArray(rawTests.public) || rawTests.public.length === 0)),
+  );
+
+  if (rules.tests?.hidden?.length > 0 && !needsCanonicalTestRepair) {
+    return { rules, persisted: false };
+  }
+
+  if (rules.tests?.hidden?.length > 0 && needsCanonicalTestRepair) {
+    const repairedRules = {
+      ...rules,
+      tests: {
+        ...rules.tests,
+        public: canonicalPublicTests,
+        hidden: canonicalHiddenTests,
+      },
+    };
+    return {
+      rules: loadDatabaseRules({ ...problem, rules: repairedRules }),
+      persisted: true,
+      persistedRules: repairedRules,
+      repairedLegacyPublicTests: true,
+    };
+  }
+
+  try {
+    const generated = await generateHiddenTests({
+      title: problem.title,
+      statement: problem.statement,
+      problemSpec: rules.problem_spec,
+      publicTests: canonicalPublicTests,
+    });
+    const persistedRules = {
+      ...rules,
+      tests: {
+        ...rules.tests,
+        public: canonicalPublicTests,
+        hidden: generated.tests,
+        generation: generated.metadata,
+      },
+    };
+    return {
+      rules: loadDatabaseRules({ ...problem, rules: persistedRules }),
+      persisted: true,
+      persistedRules,
+    };
+  } catch (error) {
+    return {
+      rules: {
+        ...rules,
+        tests: {
+          ...rules.tests,
+          generation: {
+            status: "UNAVAILABLE",
+            source: "ollama",
+            reason: error.message,
+          },
+        },
+      },
+      persisted: false,
+      generationError: error.message,
+    };
+  }
 }
 
 // ---------------------------------------------------------
@@ -572,7 +729,22 @@ async function gradeSubmission(submissionId) {
     }
 
     console.log(`📋 Loaded Rules for: ${submission.problem.title}`);
-    const rules = loadDatabaseRules(submission.problem);
+    let rules = loadDatabaseRules(submission.problem);
+    const hiddenMaterialization = await materializeHiddenTests(submission.problem, rules);
+    rules = hiddenMaterialization.rules;
+    if (hiddenMaterialization.persisted) {
+      await prisma.problem.update({
+        where: { id: submission.problemId },
+        data: { rules: hiddenMaterialization.persistedRules },
+      });
+      console.log(
+        `🧪 Persisted ${rules.tests.hidden.length} AI-generated hidden tests for ${submission.problem.title}.`,
+      );
+    } else if (hiddenMaterialization.generationError) {
+      console.warn(
+        `⚠️ Hidden-test generation unavailable for ${submission.problem.title}: ${hiddenMaterialization.generationError}`,
+      );
+    }
     const reportMetadata = buildReportMetadata({
       code: submission.code,
       rules,
@@ -607,6 +779,7 @@ async function gradeSubmission(submissionId) {
         submissionId,
         ...reportMetadata,
         firstPass,
+          testExecution: buildTestExecutionSummary(rules, []),
         finalScore: 0,
         metrics: [
           {
@@ -726,6 +899,7 @@ async function gradeSubmission(submissionId) {
       });
     }
     const reviewSignals = buildReviewSignals(reportMetrics);
+    const testExecution = buildTestExecutionSummary(rules, reportMetrics);
 
     // 🔥 PEER-TO-PEER PLAGIARISM CHECK 🔥
     console.log(`\n🕵️‍♂️ Checking for Peer Plagiarism...`);
@@ -802,6 +976,7 @@ async function gradeSubmission(submissionId) {
             marks_deducted: integrityPenalty,
             marks_after_integrity: totalScore,
           },
+          testExecution,
           usefulness: [
             "Provides deterministic test evidence and weighted metric contributions.",
             "Provides actionable feedback for failed cases and configured code-quality metrics.",
