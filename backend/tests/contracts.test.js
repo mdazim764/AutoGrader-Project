@@ -2,14 +2,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { validateRules } = require("../src/contracts/rules.contract");
 const { createReport } = require("../src/contracts/report.contract");
-const { validateGeneratedTests } = require("../src/services/agents/hidden-tests.agent");
+const {
+  validateGeneratedTests,
+} = require("../src/services/agents/hidden-tests.agent");
 
 function baseRules(overrides = {}) {
   return {
     schema_version: "1.1",
     metrics: [
       { name: "logical", analyzer: "logical", weight: 0.6, params: {} },
-      { name: "complexity", analyzer: "complexity", weight: 0.4, params: { required: "O(N)" } },
+      {
+        name: "complexity",
+        analyzer: "complexity",
+        weight: 0.4,
+        params: { required: "O(N)" },
+      },
     ],
     tests: {
       public: [{ id: "basic", input: "5", expected: "120" }],
@@ -36,12 +43,16 @@ test("normalizes public and hidden tests into logical analyzer cases", () => {
 });
 
 test("normalizes structured test inputs without producing [object Object]", () => {
-  const rules = validateRules(baseRules({
-    tests: {
-      public: [{ id: "palindrome", input: { value: 121 }, expected: ["121"] }],
-      hidden: [],
-    },
-  }));
+  const rules = validateRules(
+    baseRules({
+      tests: {
+        public: [
+          { id: "palindrome", input: { value: 121 }, expected: ["121"] },
+        ],
+        hidden: [],
+      },
+    }),
+  );
   assert.equal(rules.tests.public[0].input, "121");
   assert.equal(rules.tests.public[0].expected, "121");
 });
@@ -99,7 +110,10 @@ test("promotes legacy named cases into canonical public tests", () => {
     rules.metrics[0].params.cases.map((testCase) => testCase.case),
     ["basic", "zero"],
   );
-  assert.deepEqual(rules.tests.public.map((testCase) => testCase.case), ["basic", "zero"]);
+  assert.deepEqual(
+    rules.tests.public.map((testCase) => testCase.case),
+    ["basic", "zero"],
+  );
 });
 
 test("does not duplicate hidden cases when repairing legacy public tests", () => {
@@ -109,54 +123,67 @@ test("does not duplicate hidden cases when repairing legacy public tests", () =>
       public: [],
       hidden: [{ id: "generated", input: "99", expected: "99" }],
     },
-    metrics: [{
-      name: "logical",
-      analyzer: "logical",
-      weight: 1,
-      params: {
-        cases: [
-          { id: "public-legacy", input: "1", expected: "1" },
-          { id: "generated", input: "99", expected: "99" },
-        ],
+    metrics: [
+      {
+        name: "logical",
+        analyzer: "logical",
+        weight: 1,
+        params: {
+          cases: [
+            { id: "public-legacy", input: "1", expected: "1" },
+            { id: "generated", input: "99", expected: "99" },
+          ],
+        },
       },
-    }],
+    ],
   });
-  assert.deepEqual(rules.tests.public.map((testCase) => testCase.id), ["public-legacy"]);
+  assert.deepEqual(
+    rules.tests.public.map((testCase) => testCase.id),
+    ["public-legacy"],
+  );
   assert.equal(rules.tests.hidden.length, 1);
 });
 
 test("rejects weights that do not total one", () => {
   assert.throws(
-    () => validateRules({
-      metrics: [{ name: "logical", weight: 0.5, params: { cases: ["basic"] } }],
-    }),
+    () =>
+      validateRules({
+        metrics: [
+          { name: "logical", weight: 0.5, params: { cases: ["basic"] } },
+        ],
+      }),
     /weights must sum to 1\.0/,
   );
 });
 
 test("rejects non-review-only AI integrity actions", () => {
   assert.throws(
-    () => validateRules(baseRules({
-      integrity: {
-        exact_peer_match_action: "ZERO_SCORE",
-        similarity_review_threshold: 0.85,
-        similarity_action: "REVIEW_ONLY",
-        ai_action: "ZERO_SCORE",
-      },
-    })),
+    () =>
+      validateRules(
+        baseRules({
+          integrity: {
+            exact_peer_match_action: "ZERO_SCORE",
+            similarity_review_threshold: 0.85,
+            similarity_action: "REVIEW_ONLY",
+            ai_action: "ZERO_SCORE",
+          },
+        }),
+      ),
     /AI authorship signals must remain REVIEW_ONLY/,
   );
 });
 
 test("validates similarity thresholds and integrity actions", () => {
-  const rules = validateRules(baseRules({
-    integrity: {
-      exact_peer_match_action: "REVIEW_ONLY",
-      similarity_review_threshold: 0.9,
-      similarity_action: "REVIEW_ONLY",
-      ai_action: "REVIEW_ONLY",
-    },
-  }));
+  const rules = validateRules(
+    baseRules({
+      integrity: {
+        exact_peer_match_action: "REVIEW_ONLY",
+        similarity_review_threshold: 0.9,
+        similarity_action: "REVIEW_ONLY",
+        ai_action: "REVIEW_ONLY",
+      },
+    }),
+  );
   assert.equal(rules.integrity.exact_peer_match_action, "REVIEW_ONLY");
   assert.equal(rules.integrity.similarity_review_threshold, 0.9);
 });
@@ -181,8 +208,21 @@ test("persists test execution coverage and generated counter-case status", () =>
     submissionId: "submission-coverage",
     testExecution: {
       configured: { public_count: 1, hidden_count: 1, total_count: 2 },
-      executed: { public_count: 1, hidden_count: 1, total_count: 2, all_configured: true },
-      counter_cases: [{ input: "99", expected: "100", status: "GENERATED_NOT_EXECUTED", executed: false, scored: false }],
+      executed: {
+        public_count: 1,
+        hidden_count: 1,
+        total_count: 2,
+        all_configured: true,
+      },
+      counter_cases: [
+        {
+          input: "99",
+          expected: "100",
+          status: "GENERATED_NOT_EXECUTED",
+          executed: false,
+          scored: false,
+        },
+      ],
     },
   });
   assert.equal(report.test_execution.executed.hidden_count, 1);

@@ -29,11 +29,17 @@ function validateGeneratedTests(value, publicTests) {
     if (seen.has(key)) continue;
     seen.add(key);
     tests.push({
-      id: normalizeText(candidate.id || candidate.case || `ai_hidden_${tests.length + 1}`),
-      case: normalizeText(candidate.case || candidate.id || `AI hidden case ${tests.length + 1}`),
+      id: normalizeText(
+        candidate.id || candidate.case || `ai_hidden_${tests.length + 1}`,
+      ),
+      case: normalizeText(
+        candidate.case || candidate.id || `AI hidden case ${tests.length + 1}`,
+      ),
       input,
       expected,
-      description: normalizeText(candidate.description || "AI-generated corner or boundary case"),
+      description: normalizeText(
+        candidate.description || "AI-generated corner or boundary case",
+      ),
       source: "ai_generated",
       generated_by: getConfiguration().model,
     });
@@ -41,12 +47,19 @@ function validateGeneratedTests(value, publicTests) {
   }
 
   if (tests.length === 0) {
-    throw new Error("The hidden-test agent returned no valid non-duplicate cases.");
+    throw new Error(
+      "The hidden-test agent returned no valid non-duplicate cases.",
+    );
   }
   return tests;
 }
 
-async function generateHiddenTests({ title, statement, problemSpec, publicTests }) {
+async function generateHiddenTests({
+  title,
+  statement,
+  problemSpec,
+  publicTests,
+}) {
   const prompt = `You are the hidden-test designer for a deterministic C programming grader.
 Generate 2 to 4 hidden test cases for the assignment below. They must target corner cases,
 boundaries, invalid assumptions, overflow, empty/small/large inputs, or unusual valid input

@@ -13,22 +13,30 @@ async function createProblem(req, res) {
     const problem = await problemService.createProblem(req.body, req.user.id);
     res.json({ message: "Problem created successfully!", problem });
   } catch (error) {
-    res.status(error.statusCode || (error.code === "INVALID_RULES" ? 400 : 500)).json({
-      error: error.message,
-      ...(error.details ? { details: error.details } : {}),
-    });
+    res
+      .status(error.statusCode || (error.code === "INVALID_RULES" ? 400 : 500))
+      .json({
+        error: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      });
   }
 }
 
 async function updateProblem(req, res) {
   try {
-    const problem = await problemService.updateProblem(req.params.id, req.body, req.user.id);
+    const problem = await problemService.updateProblem(
+      req.params.id,
+      req.body,
+      req.user.id,
+    );
     res.json(problem);
   } catch (error) {
-    res.status(error.statusCode || (error.code === "INVALID_RULES" ? 400 : 500)).json({
-      error: error.message,
-      ...(error.details ? { details: error.details } : {}),
-    });
+    res
+      .status(error.statusCode || (error.code === "INVALID_RULES" ? 400 : 500))
+      .json({
+        error: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      });
   }
 }
 

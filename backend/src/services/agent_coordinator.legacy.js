@@ -53,7 +53,8 @@ function buildDeterministicAiReview({
     signal: false,
     is_ai: false,
     confidence: 0,
-    reason: "LLM authorship review was unavailable; deterministic source-trait review found no conclusive AI signal.",
+    reason:
+      "LLM authorship review was unavailable; deterministic source-trait review found no conclusive AI signal.",
     evidence,
     source_summary: {
       comments: comments.length,
@@ -136,11 +137,14 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
   const details = [];
 
   for (const testCase of normalizedCases) {
-    const generated = (!testCase.input || !testCase.expected)
-      ? generateEdgeCase(testCase.case)
-      : null;
+    const generated =
+      !testCase.input || !testCase.expected
+        ? generateEdgeCase(testCase.case)
+        : null;
     const input = formatExecutionValue(generated?.input ?? testCase.input);
-    const expected = formatExecutionValue(generated?.expected ?? testCase.expected);
+    const expected = formatExecutionValue(
+      generated?.expected ?? testCase.expected,
+    );
     if (!input || !expected) {
       details.push({
         case: testCase.case,
@@ -205,17 +209,26 @@ async function runLogicalAgent(casesToTest, workspace, limits) {
 }
 
 function buildTestExecutionSummary(rules, metrics) {
-  const logicalMetric = metrics.find((metric) =>
-    ["logical", "correctness", "io_tests", "edge_case_runner"].includes(metric.name)
-      && Array.isArray(metric.evidence?.details),
+  const logicalMetric = metrics.find(
+    (metric) =>
+      ["logical", "correctness", "io_tests", "edge_case_runner"].includes(
+        metric.name,
+      ) && Array.isArray(metric.evidence?.details),
   );
   const details = logicalMetric?.evidence?.details || [];
   const hasExplicitTests = rules.tests?.has_explicit_tests === true;
-  const configuredPublic = hasExplicitTests ? (rules.tests?.public || []) : details;
-  const configuredHidden = hasExplicitTests ? (rules.tests?.hidden || []) : [];
-  const count = (items, visibility) => items.filter((item) => item.visibility === visibility).length;
-  const passed = (items, visibility) => items.filter((item) => item.visibility === visibility && item.passed).length;
-  const failed = (items, visibility) => items.filter((item) => item.visibility === visibility && !item.passed).length;
+  const configuredPublic = hasExplicitTests
+    ? rules.tests?.public || []
+    : details;
+  const configuredHidden = hasExplicitTests ? rules.tests?.hidden || [] : [];
+  const count = (items, visibility) =>
+    items.filter((item) => item.visibility === visibility).length;
+  const passed = (items, visibility) =>
+    items.filter((item) => item.visibility === visibility && item.passed)
+      .length;
+  const failed = (items, visibility) =>
+    items.filter((item) => item.visibility === visibility && !item.passed)
+      .length;
   const counterCases = metrics
     .filter((metric) => metric.aiFeedback?.counter_case)
     .map((metric) => ({
@@ -226,14 +239,17 @@ function buildTestExecutionSummary(rules, metrics) {
       executed: false,
       scored: false,
     }));
-  const generation = rules.tests?.generation || { status: "INSTRUCTOR_CONFIGURED" };
-  const generationNote = generation.status === "GENERATED"
-    ? `Hidden tests were generated once by ${generation.model || "the AI test designer"}, persisted in the problem rules, and reused for later submissions.`
-    : generation.status === "UNAVAILABLE"
-      ? `Hidden-test generation was unavailable: ${generation.reason || "the AI test designer could not be reached"}.`
-      : counterCases.length
-        ? "Counter cases are generated as advisory feedback after a deterministic failure; they are not included in the score unless explicitly added to the instructor rules."
-        : "All executed cases came from the instructor-configured test set.";
+  const generation = rules.tests?.generation || {
+    status: "INSTRUCTOR_CONFIGURED",
+  };
+  const generationNote =
+    generation.status === "GENERATED"
+      ? `Hidden tests were generated once by ${generation.model || "the AI test designer"}, persisted in the problem rules, and reused for later submissions.`
+      : generation.status === "UNAVAILABLE"
+        ? `Hidden-test generation was unavailable: ${generation.reason || "the AI test designer could not be reached"}.`
+        : counterCases.length
+          ? "Counter cases are generated as advisory feedback after a deterministic failure; they are not included in the score unless explicitly added to the instructor rules."
+          : "All executed cases came from the instructor-configured test set.";
 
   return {
     configured: {
@@ -245,7 +261,8 @@ function buildTestExecutionSummary(rules, metrics) {
       public_count: count(details, "public"),
       hidden_count: count(details, "hidden"),
       total_count: details.length,
-      all_configured: details.length === configuredPublic.length + configuredHidden.length,
+      all_configured:
+        details.length === configuredPublic.length + configuredHidden.length,
     },
     results: {
       public_passed: passed(details, "public"),
@@ -261,30 +278,39 @@ function buildTestExecutionSummary(rules, metrics) {
 
 async function materializeHiddenTests(problem, rules) {
   const canonicalPublicTests = (rules.tests?.public || []).map((testCase) => {
-    const generated = (!testCase.input || !testCase.expected)
-      ? generateEdgeCase(testCase.case)
-      : null;
+    const generated =
+      !testCase.input || !testCase.expected
+        ? generateEdgeCase(testCase.case)
+        : null;
     return generated
       ? { ...testCase, input: generated.input, expected: generated.expected }
       : testCase;
   });
-  const rawTests = problem.rules && typeof problem.rules === "object"
-    ? problem.rules.tests
-    : null;
+  const rawTests =
+    problem.rules && typeof problem.rules === "object"
+      ? problem.rules.tests
+      : null;
   const publicKeys = new Set(
-    canonicalPublicTests.map((testCase) => `${testCase.input}\u0000${testCase.expected}`),
+    canonicalPublicTests.map(
+      (testCase) => `${testCase.input}\u0000${testCase.expected}`,
+    ),
   );
   const canonicalHiddenTests = (rules.tests?.hidden || []).filter(
-    (testCase) => !publicKeys.has(`${testCase.input}\u0000${testCase.expected}`),
+    (testCase) =>
+      !publicKeys.has(`${testCase.input}\u0000${testCase.expected}`),
   );
-  const publicTestsChanged = JSON.stringify(canonicalPublicTests)
-    !== JSON.stringify(rules.tests?.public || []);
-  const hiddenTestsChanged = canonicalHiddenTests.length !== (rules.tests?.hidden || []).length;
+  const publicTestsChanged =
+    JSON.stringify(canonicalPublicTests) !==
+    JSON.stringify(rules.tests?.public || []);
+  const hiddenTestsChanged =
+    canonicalHiddenTests.length !== (rules.tests?.hidden || []).length;
   const needsCanonicalTestRepair = Boolean(
-    publicTestsChanged
-      || hiddenTestsChanged
-      || (rules.tests?.public?.length > 0
-        && (!rawTests || !Array.isArray(rawTests.public) || rawTests.public.length === 0)),
+    publicTestsChanged ||
+    hiddenTestsChanged ||
+    (rules.tests?.public?.length > 0 &&
+      (!rawTests ||
+        !Array.isArray(rawTests.public) ||
+        rawTests.public.length === 0)),
   );
 
   if (rules.tests?.hidden?.length > 0 && !needsCanonicalTestRepair) {
@@ -612,9 +638,7 @@ Do not claim to determine who authored the code. Report only whether the code ha
       `  🔍 Observable traits: ${comments.length} comments, ${explanatoryComments} explanatory comments, ${functions.length} functions, ${longIdentifiers} long identifiers.`,
     );
     const parsed = await generateJson(prompt, {
-      timeoutMs: Number(
-        process.env.OLLAMA_AI_DETECTOR_TIMEOUT_MS || 120000,
-      ),
+      timeoutMs: Number(process.env.OLLAMA_AI_DETECTOR_TIMEOUT_MS || 120000),
       retries: Number(process.env.OLLAMA_AI_DETECTOR_RETRIES || 2),
     });
     console.log(`  🔍 AI Detector Output: ${JSON.stringify(parsed)}`);
@@ -633,13 +657,21 @@ Do not claim to determine who authored the code. Report only whether the code ha
       functions.length >= 3,
       modelEvidence.length >= 3,
     ].filter(Boolean).length;
+    const tutorialCommentSignal = comments.some((comment) =>
+      /tutor note|autograder|grading system|exact|required|error handler|wrap[- ]around|strict .* semantics|return 0/i.test(comment),
+    );
+    const deterministicSignal = Boolean(
+      (explanatoryComments >= 3 && comments.length >= 6)
+      || (tutorialCommentSignal && explanatoryComments >= 2 && longIdentifiers >= 2),
+    );
     console.log(`  🔍 Strong observable traits: ${strongObservableTraits}`);
-    // A review flag requires multiple observable traits and high model
-    // confidence. Common algorithms and clean formatting alone are not enough.
+    console.log(`  🔍 Deterministic tutorial-style signal: ${deterministicSignal}`);
+    // This is a review signal, not authorship proof. Require corroborating
+    // observable traits and a cautious model confidence threshold.
     const signal = Boolean(
-      (parsed.signal ?? parsed.is_ai) &&
-      confidence >= 85 &&
-      strongObservableTraits >= 2,
+      confidence >= 75 &&
+      strongObservableTraits >= 2 &&
+      ((parsed.signal ?? parsed.is_ai) || deterministicSignal),
     );
 
     console.log(
@@ -659,6 +691,7 @@ Do not claim to determine who authored the code. Report only whether the code ha
       model_reason: String(parsed.reason || "No explanation was returned."),
       scoring_impact: 0,
       strong_observable_traits: strongObservableTraits,
+      deterministic_tutorial_signal: deterministicSignal,
       source_summary: {
         comments: comments.length,
         explanatory_comments: explanatoryComments,
@@ -669,7 +702,9 @@ Do not claim to determine who authored the code. Report only whether the code ha
       review_only: true,
     };
   } catch (error) {
-    console.log(`  ⚠️ AI Detector LLM unavailable; using deterministic fallback: ${error.message}`);
+    console.log(
+      `  ⚠️ AI Detector LLM unavailable; using deterministic fallback: ${error.message}`,
+    );
     return buildDeterministicAiReview({
       comments,
       explanatoryComments,
@@ -730,7 +765,10 @@ async function gradeSubmission(submissionId) {
 
     console.log(`📋 Loaded Rules for: ${submission.problem.title}`);
     let rules = loadDatabaseRules(submission.problem);
-    const hiddenMaterialization = await materializeHiddenTests(submission.problem, rules);
+    const hiddenMaterialization = await materializeHiddenTests(
+      submission.problem,
+      rules,
+    );
     rules = hiddenMaterialization.rules;
     if (hiddenMaterialization.persisted) {
       await prisma.problem.update({
@@ -779,7 +817,7 @@ async function gradeSubmission(submissionId) {
         submissionId,
         ...reportMetadata,
         firstPass,
-          testExecution: buildTestExecutionSummary(rules, []),
+        testExecution: buildTestExecutionSummary(rules, []),
         finalScore: 0,
         metrics: [
           {

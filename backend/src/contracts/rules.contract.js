@@ -21,7 +21,11 @@ const ALLOWED_ANALYZERS = new Set([
 const DEFAULT_TIME_LIMIT_SEC = 1;
 const DEFAULT_MEMORY_LIMIT_MB = 64;
 const DEFAULT_SIMILARITY_THRESHOLD = 0.85;
-const INTEGRITY_ACTIONS = new Set(["ZERO_SCORE", "REVIEW_ONLY", "BLOCK_SUBMISSION"]);
+const INTEGRITY_ACTIONS = new Set([
+  "ZERO_SCORE",
+  "REVIEW_ONLY",
+  "BLOCK_SUBMISSION",
+]);
 
 class RuleValidationError extends Error {
   constructor(message, details = []) {
@@ -65,9 +69,10 @@ function normalizeMetric(metric, index) {
   }
 
   const name = typeof metric.name === "string" ? metric.name.trim() : "";
-  const analyzer = typeof metric.analyzer === "string" && metric.analyzer.trim()
-    ? metric.analyzer.trim()
-    : name;
+  const analyzer =
+    typeof metric.analyzer === "string" && metric.analyzer.trim()
+      ? metric.analyzer.trim()
+      : name;
   const weight = Number(metric.weight);
 
   if (!name) {
@@ -99,11 +104,12 @@ function normalizeTestCase(testCase, index, visibility) {
     );
   }
 
-  const id = typeof testCase.id === "string" && testCase.id.trim()
-    ? testCase.id.trim()
-    : typeof testCase.case === "string" && testCase.case.trim()
-      ? testCase.case.trim()
-      : `${visibility}_${index + 1}`;
+  const id =
+    typeof testCase.id === "string" && testCase.id.trim()
+      ? testCase.id.trim()
+      : typeof testCase.case === "string" && testCase.case.trim()
+        ? testCase.case.trim()
+        : `${visibility}_${index + 1}`;
   const input = normalizeCaseValue(testCase.input);
   const expected = normalizeCaseValue(testCase.expected);
   if (!input.trim() && !expected.trim()) {
@@ -121,14 +127,17 @@ function normalizeTestCase(testCase, index, visibility) {
 
   return {
     id,
-    case: typeof testCase.case === "string" && testCase.case.trim()
-      ? testCase.case.trim()
-      : id,
+    case:
+      typeof testCase.case === "string" && testCase.case.trim()
+        ? testCase.case.trim()
+        : id,
     visibility: visibility.toLowerCase(),
     input,
     expected,
     ...(weight === null ? {} : { weight }),
-    ...(typeof testCase.description === "string" ? { description: testCase.description } : {}),
+    ...(typeof testCase.description === "string"
+      ? { description: testCase.description }
+      : {}),
   };
 }
 
@@ -151,14 +160,24 @@ function normalizeTests(parsed) {
           ? parsed.hidden
           : [];
   const legacyCases = parsed.metrics
-    .flatMap((metric) => Array.isArray(metric.params?.cases) ? metric.params.cases : [])
-    .filter((testCase, index, cases) =>
-      cases.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(testCase)) === index,
+    .flatMap((metric) =>
+      Array.isArray(metric.params?.cases) ? metric.params.cases : [],
+    )
+    .filter(
+      (testCase, index, cases) =>
+        cases.findIndex(
+          (candidate) => JSON.stringify(candidate) === JSON.stringify(testCase),
+        ) === index,
     );
-  const hiddenKeys = new Set(hiddenValues.map((testCase) => JSON.stringify(testCase)));
-  const publicValues = configuredPublicValues.length > 0
-    ? configuredPublicValues
-    : legacyCases.filter((testCase) => !hiddenKeys.has(JSON.stringify(testCase)));
+  const hiddenKeys = new Set(
+    hiddenValues.map((testCase) => JSON.stringify(testCase)),
+  );
+  const publicValues =
+    configuredPublicValues.length > 0
+      ? configuredPublicValues
+      : legacyCases.filter(
+          (testCase) => !hiddenKeys.has(JSON.stringify(testCase)),
+        );
   const hasExplicitTests = publicValues.length > 0 || hiddenValues.length > 0;
   const publicCases = publicValues.map((testCase, index) =>
     normalizeTestCase(
@@ -177,7 +196,9 @@ function normalizeTests(parsed) {
     public: publicCases,
     hidden: hiddenCases,
     has_explicit_tests: hasExplicitTests,
-    ...(isPlainObject(configured.generation) ? { generation: configured.generation } : {}),
+    ...(isPlainObject(configured.generation)
+      ? { generation: configured.generation }
+      : {}),
   };
 }
 
@@ -194,12 +215,15 @@ function normalizeIntegrity(value) {
   if (!isPlainObject(integrity)) {
     throw new RuleValidationError("integrity must be a JSON object.");
   }
-  const exactPeerMatchAction = integrity.exact_peer_match_action || "ZERO_SCORE";
+  const exactPeerMatchAction =
+    integrity.exact_peer_match_action || "ZERO_SCORE";
   const similarityAction = integrity.similarity_action || "REVIEW_ONLY";
   const aiAction = integrity.ai_action || "REVIEW_ONLY";
-  if (!INTEGRITY_ACTIONS.has(exactPeerMatchAction)
-    || !INTEGRITY_ACTIONS.has(similarityAction)
-    || !INTEGRITY_ACTIONS.has(aiAction)) {
+  if (
+    !INTEGRITY_ACTIONS.has(exactPeerMatchAction) ||
+    !INTEGRITY_ACTIONS.has(similarityAction) ||
+    !INTEGRITY_ACTIONS.has(aiAction)
+  ) {
     throw new RuleValidationError(
       "Integrity actions must be ZERO_SCORE, REVIEW_ONLY, or BLOCK_SUBMISSION.",
     );
@@ -213,7 +237,9 @@ function normalizeIntegrity(value) {
     );
   }
   if (aiAction !== "REVIEW_ONLY") {
-    throw new RuleValidationError("AI authorship signals must remain REVIEW_ONLY.");
+    throw new RuleValidationError(
+      "AI authorship signals must remain REVIEW_ONLY.",
+    );
   }
   return {
     exact_peer_match_action: exactPeerMatchAction,
@@ -232,9 +258,8 @@ function validateRules(value, limits = {}) {
   if (!Array.isArray(parsed.metrics) || parsed.metrics.length === 0) {
     throw new RuleValidationError("Rules must define at least one metric.");
   }
-  const schemaVersion = parsed.schema_version === undefined
-    ? "1.1"
-    : String(parsed.schema_version);
+  const schemaVersion =
+    parsed.schema_version === undefined ? "1.1" : String(parsed.schema_version);
   if (!["1.0", "1.1"].includes(schemaVersion)) {
     throw new RuleValidationError(
       `Unsupported rules schema version "${schemaVersion}".`,
@@ -242,34 +267,48 @@ function validateRules(value, limits = {}) {
   }
 
   const metrics = parsed.metrics.map(normalizeMetric);
-  const weightTotal = metrics.reduce((total, metric) => total + metric.weight, 0);
+  const weightTotal = metrics.reduce(
+    (total, metric) => total + metric.weight,
+    0,
+  );
   if (Math.abs(weightTotal - 1) > 0.000001) {
     throw new RuleValidationError(
       `Metric weights must sum to 1.0; received ${weightTotal.toFixed(6)}.`,
     );
   }
 
-  const timeLimitSec = Number(parsed.time_limit_s ?? limits.timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC);
-  const memoryLimitMb = Number(parsed.memory_limit_mb ?? limits.memoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB);
+  const timeLimitSec = Number(
+    parsed.time_limit_s ?? limits.timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC,
+  );
+  const memoryLimitMb = Number(
+    parsed.memory_limit_mb ?? limits.memoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB,
+  );
   if (!Number.isInteger(timeLimitSec) || timeLimitSec <= 0) {
     throw new RuleValidationError("time_limit_s must be a positive integer.");
   }
   if (!Number.isInteger(memoryLimitMb) || memoryLimitMb <= 0) {
-    throw new RuleValidationError("memory_limit_mb must be a positive integer.");
+    throw new RuleValidationError(
+      "memory_limit_mb must be a positive integer.",
+    );
   }
   const tests = normalizeTests(parsed);
   const integrity = normalizeIntegrity(parsed.integrity);
   const problemSpec = normalizeProblemSpec(parsed.problem_spec);
   const allCases = [...tests.public, ...tests.hidden];
   const metricsWithCases = metrics.map((metric) => {
-    if (!["logical", "edge_case_runner", "io_tests"].includes(metric.analyzer)) {
+    if (
+      !["logical", "edge_case_runner", "io_tests"].includes(metric.analyzer)
+    ) {
       return metric;
     }
     return {
       ...metric,
       params: {
         ...metric.params,
-        cases: tests.has_explicit_tests && allCases.length > 0 ? allCases : metric.params.cases,
+        cases:
+          tests.has_explicit_tests && allCases.length > 0
+            ? allCases
+            : metric.params.cases,
       },
     };
   });

@@ -6,22 +6,26 @@ async function listProblems(user) {
   if (user?.role === "INSTRUCTOR") return problems;
 
   return problems.map((problem) => {
-    const rules = typeof problem.rules === "object" && problem.rules !== null
-      ? problem.rules
-      : {};
-    const tests = rules.tests && typeof rules.tests === "object" ? rules.tests : {};
+    const rules =
+      typeof problem.rules === "object" && problem.rules !== null
+        ? problem.rules
+        : {};
+    const tests =
+      rules.tests && typeof rules.tests === "object" ? rules.tests : {};
     const metrics = Array.isArray(rules.metrics)
       ? rules.metrics.map((metric) => {
-        const cases = metric?.params?.cases;
-        if (!Array.isArray(cases)) return metric;
-        return {
-          ...metric,
-          params: {
-            ...metric.params,
-            cases: cases.filter((testCase) => testCase?.visibility !== "hidden"),
-          },
-        };
-      })
+          const cases = metric?.params?.cases;
+          if (!Array.isArray(cases)) return metric;
+          return {
+            ...metric,
+            params: {
+              ...metric.params,
+              cases: cases.filter(
+                (testCase) => testCase?.visibility !== "hidden",
+              ),
+            },
+          };
+        })
       : rules.metrics;
     return {
       ...problem,

@@ -1,6 +1,4 @@
-const {
-  normalizeAnalyzerResult,
-} = require("./analyzer-result.contract");
+const { normalizeAnalyzerResult } = require("./analyzer-result.contract");
 
 const REPORT_SCHEMA_VERSION = "1.1";
 
