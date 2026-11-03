@@ -71,10 +71,13 @@ export default function SubmissionAnalytics() {
           <tbody className="divide-y divide-gray-800">
             {paginatedSubmissions.map((sub) => {
               
-              const aiMetric = sub.report?.metrics?.find(m => ['ai_detection', 'originality'].includes(m.name));
+              const aiMetric = sub.report?.metrics?.find(m => m.name === 'ai_detection');
+              const originalityMetric = sub.report?.metrics?.find(m => ['originality', 'similarity_flag'].includes(m.name));
               const aiEvidence = aiMetric?.evidence || aiMetric?.details || {};
+              const originalityEvidence = originalityMetric?.evidence || originalityMetric?.details || {};
               const aiConfidence = aiEvidence.confidence || 0;
-              const isAiFlagged = aiEvidence.is_ai || aiEvidence.flagged;
+              const isAiFlagged = Boolean(aiEvidence.signal || aiEvidence.is_ai);
+              const isSimilarityFlagged = Boolean(originalityEvidence.flagged);
 
               return (
                 <Fragment key={sub.id}>
@@ -120,12 +123,18 @@ export default function SubmissionAnalytics() {
                       {/* AI GENERATION FLAG */}
                       {isAiFlagged && (
                         <span className="flex items-center gap-1 bg-purple-900/30 text-purple-400 px-2 py-1 rounded border border-purple-800/50 text-xs font-semibold w-full justify-center">
-                          <Bot size={14} /> Review signal {aiConfidence ? `(${aiConfidence}%)` : ''}
+                          <Bot size={14} /> AI-style signal {aiConfidence ? `(${aiConfidence}%)` : ''}
+                        </span>
+                      )}
+
+                      {isSimilarityFlagged && !sub.isPlagiarized && (
+                        <span className="flex items-center gap-1 bg-amber-900/30 text-amber-400 px-2 py-1 rounded border border-amber-800/50 text-xs font-semibold w-full justify-center">
+                          <AlertTriangle size={14} /> Similarity review
                         </span>
                       )}
 
                       {/* CLEAR STATUS */}
-                      {!sub.isPlagiarized && !isAiFlagged && (
+                      {!sub.isPlagiarized && !isAiFlagged && !isSimilarityFlagged && (
                         <span className="text-gray-600 text-xs">Clear</span>
                       )}
                     </div>
@@ -147,12 +156,25 @@ export default function SubmissionAnalytics() {
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">Metric breakdown</p>
                           <div className="mt-3 space-y-2">
-                            {(sub.report?.metrics || []).map((metric) => (
-                              <div key={metric.name} className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-xs">
-                                <span className="capitalize text-gray-300">{String(metric.name).replace(/_/g, ' ')}</span>
-                                <span className="text-gray-400">{metric.status || '—'} · {metric.score == null ? 'N/A' : `${Math.round(metric.score * 100)}%`} · contribution {metric.contribution == null ? 'N/A' : Math.round(metric.contribution)}</span>
-                              </div>
-                            ))}
+                            {(sub.report?.metrics || []).map((metric) => {
+                              const evidence = metric.evidence || metric.details || {};
+                              const isAiMetric = metric.name === 'ai_detection';
+                              return (
+                                <div key={metric.name} className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-xs">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="capitalize text-gray-300">{isAiMetric ? 'AI-style review' : String(metric.name).replace(/_/g, ' ')}</span>
+                                    <span className="text-gray-400">{isAiMetric ? (evidence.is_ai || evidence.signal ? `SIGNAL · ${evidence.confidence ?? 0}%` : 'NO SIGNAL') : `${metric.status || '—'} · ${metric.score == null ? 'N/A' : `${Math.round(metric.score * 100)}%`} · contribution ${metric.contribution == null ? 'N/A' : Math.round(metric.contribution)}`}</span>
+                                  </div>
+                                  {isAiMetric && (
+                                    <div className="mt-2 space-y-1 text-slate-400">
+                                      <p>{evidence.reason || 'No AI-style review explanation was recorded.'}</p>
+                                      <p className="text-emerald-300">Review-only signal; marks affected: {evidence.scoring_impact ?? 0}.</p>
+                                      {Array.isArray(evidence.evidence) && evidence.evidence.length > 0 && <p>Evidence: {evidence.evidence.join(' · ')}</p>}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
