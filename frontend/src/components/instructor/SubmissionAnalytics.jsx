@@ -1,12 +1,14 @@
 import { Fragment, useState, useEffect } from 'react';
 import { submissionAPI } from '../../api/services';
-import { AlertTriangle, CheckCircle, XCircle, Clock, Filter, Bot, UserSearch } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, Clock, Filter, Bot, UserSearch, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function SubmissionAnalytics() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState('All');
   const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     submissionAPI.getAll().then(res => {
@@ -25,6 +27,12 @@ export default function SubmissionAnalytics() {
   const filteredSubmissions = selectedFilter === 'All' 
     ? submissions 
     : submissions.filter(s => s.problem?.title === selectedFilter);
+  const totalPages = Math.max(1, Math.ceil(filteredSubmissions.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const paginatedSubmissions = filteredSubmissions.slice(pageStart, pageStart + pageSize);
+  const visiblePageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1)
+    .filter((page) => page === 1 || page === totalPages || Math.abs(page - safePage) <= 1);
 
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 shadow-sm overflow-hidden">
@@ -36,7 +44,11 @@ export default function SubmissionAnalytics() {
           <select 
             className="bg-gray-950 border border-gray-700 text-sm rounded-lg p-2 text-white outline-none focus:border-blue-500"
             value={selectedFilter}
-            onChange={(e) => setSelectedFilter(e.target.value)}
+            onChange={(e) => {
+              setSelectedFilter(e.target.value);
+              setCurrentPage(1);
+              setSelectedSubmission(null);
+            }}
           >
             <option value="All">All Problems</option>
             {uniqueProblems.map(p => <option key={p} value={p}>{p}</option>)}
@@ -57,7 +69,7 @@ export default function SubmissionAnalytics() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
-            {filteredSubmissions.map((sub) => {
+            {paginatedSubmissions.map((sub) => {
               
               const aiMetric = sub.report?.metrics?.find(m => ['ai_detection', 'originality'].includes(m.name));
               const aiEvidence = aiMetric?.evidence || aiMetric?.details || {};
@@ -151,8 +163,75 @@ export default function SubmissionAnalytics() {
                 </Fragment>
               );
             })}
+            {paginatedSubmissions.length === 0 && (
+              <tr>
+                <td colSpan="6" className="px-6 py-10 text-center text-sm text-gray-500">No submissions match this filter.</td>
+              </tr>
+            )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-gray-800 bg-gray-950/40 px-5 py-4 text-sm text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span>
+            {filteredSubmissions.length === 0
+              ? 'Showing 0 submissions'
+              : `Showing ${pageStart + 1}-${Math.min(pageStart + pageSize, filteredSubmissions.length)} of ${filteredSubmissions.length}`}
+          </span>
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            Per page
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setCurrentPage(1);
+                setSelectedSubmission(null);
+              }}
+              className="rounded-lg border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-200 outline-none focus:border-indigo-400"
+              aria-label="Submissions per page"
+            >
+              {[10, 25, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+        </div>
+        <nav className="flex items-center justify-end gap-1" aria-label="Submission pages">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={safePage === 1}
+            className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Previous submissions page"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          {visiblePageNumbers.map((page, index) => {
+            const previousPage = visiblePageNumbers[index - 1];
+            const showGap = previousPage && page - previousPage > 1;
+            return (
+              <Fragment key={page}>
+                {showGap && <span className="px-1 text-gray-600">...</span>}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(page)}
+                  className={`min-w-8 rounded-lg border px-2 py-1.5 text-xs transition ${safePage === page ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-gray-700 text-gray-400 hover:border-indigo-400 hover:text-white'}`}
+                  aria-current={safePage === page ? 'page' : undefined}
+                >
+                  {page}
+                </button>
+              </Fragment>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={safePage === totalPages}
+            className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:border-indigo-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Next submissions page"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </nav>
       </div>
     </div>
   );
